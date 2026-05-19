@@ -1,0 +1,110 @@
+{
+  "webhook_echo": {
+    "name": "Webhook Echo",
+    "description": "A webhook that receives a request and responds with a JSON payload",
+    "keywords": [
+      "webhook",
+      "echo",
+      "receive",
+      "request",
+      "respond",
+      "json",
+      "payload",
+      "get",
+      "post",
+      "http",
+      "reply"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst webhookTrigger = trigger({\n  type: 'n8n-nodes-base.webhook',\n  version: 2.1,\n  config: { name: 'Webhook', position: [240, 200] },\n  output: [{ body: { message: 'Hello!' } }]\n});\n\nconst setResponse = node({\n  type: 'n8n-nodes-base.set',\n  version: 3.4,\n  config: { name: 'Set Response', position: [640, 200], parameters: { values: { string: [{ name: 'message', value: 'Hello from n8n!' }] } } },\n  output: [{ message: 'Hello from n8n!' }]\n});\n\nexport default workflow('webhook-echo', 'Webhook Echo')\n  .add(webhookTrigger)\n  .to(setResponse);"
+  },
+  "cron_http": {
+    "name": "Cron HTTP Fetch",
+    "description": "A scheduled workflow that fetches data from an API every hour",
+    "keywords": [
+      "cron",
+      "schedule",
+      "http",
+      "fetch",
+      "api",
+      "data",
+      "hourly",
+      "periodic",
+      "interval",
+      "weather"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst cronTrigger = trigger({\n  type: 'n8n-nodes-base.scheduleTrigger',\n  version: 1.1,\n  config: { name: 'Cron Trigger', position: [240, 200] },\n  output: [{ timestamp: '2026-05-18T00:00:00.000Z' }]\n});\n\nconst httpRequest = node({\n  type: 'n8n-nodes-base.httpRequest',\n  version: 4.2,\n  config: { name: 'HTTP Request', position: [640, 200], parameters: { url: 'https://api.example.com/data', method: 'GET' } },\n  output: [{ data: 'fetched data' }]\n});\n\nexport default workflow('cron-http', 'Cron HTTP Fetch')\n  .add(cronTrigger)\n  .to(httpRequest);"
+  },
+  "form_submit": {
+    "name": "Form Submission",
+    "description": "A webhook that receives form data and stores it in a Google Sheet",
+    "keywords": [
+      "form",
+      "submit",
+      "webhook",
+      "google",
+      "sheet",
+      "store",
+      "data",
+      "capture",
+      "submission",
+      "google sheets"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst formTrigger = trigger({\n  type: 'n8n-nodes-base.webhook',\n  version: 2.1,\n  config: { name: 'Form Webhook', position: [240, 200] },\n  output: [{ body: { name: 'John', email: 'john@example.com' } }]\n});\n\nconst googleSheet = node({\n  type: 'n8n-nodes-base.googleSheets',\n  version: 4.5,\n  config: { name: 'Store in Sheet', position: [640, 200], parameters: { operation: 'append', sheetName: 'Responses', range: 'A1' } },\n  output: [{ success: true }]\n});\n\nexport default workflow('form-submit', 'Form Submission')\n  .add(formTrigger)\n  .to(googleSheet);"
+  },
+  "slack_notification": {
+    "name": "Slack Notification",
+    "description": "Send a Slack message when a webhook is triggered",
+    "keywords": [
+      "slack",
+      "notification",
+      "alert",
+      "message",
+      "webhook",
+      "trigger",
+      "send",
+      "notify"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst slackTrigger = trigger({\n  type: 'n8n-nodes-base.webhook',\n  version: 2.1,\n  config: { name: 'Trigger', position: [240, 200] },\n  output: [{ body: { message: 'Something happened!' } }]\n});\n\nconst slackNode = node({\n  type: 'n8n-nodes-base.slack',\n  version: 2.2,\n  config: { name: 'Send Message', position: [640, 200], parameters: { channel: '#general', text: 'Hello from n8n!' } },\n  output: [{ sent: true }]\n});\n\nexport default workflow('slack-notify', 'Slack Notification')\n  .add(slackTrigger)\n  .to(slackNode);"
+  },
+  "email_alert": {
+    "name": "Email Alert",
+    "description": "Send an email when a webhook is triggered",
+    "keywords": [
+      "email",
+      "alert",
+      "send",
+      "mail",
+      "smtp",
+      "notification",
+      "webhook"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst alertTrigger = trigger({\n  type: 'n8n-nodes-base.webhook',\n  version: 2.1,\n  config: { name: 'Alert Trigger', position: [240, 200] },\n  output: [{ body: { severity: 'high', message: 'Alert!' } }]\n});\n\nconst emailNode = node({\n  type: 'n8n-nodes-base.emailSend',\n  version: 1.2,\n  config: { name: 'Send Email', position: [640, 200], parameters: { to: 'admin@example.com', subject: 'Alert from n8n', text: 'An alert was triggered.' } },\n  output: [{ sent: true }]\n});\n\nexport default workflow('email-alert', 'Email Alert')\n  .add(alertTrigger)\n  .to(emailNode);"
+  },
+  "webhook_filter": {
+    "name": "Webhook Filter",
+    "keywords": [
+      "webhook",
+      "filter",
+      "condition",
+      "if",
+      "email",
+      "alert",
+      "match"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst filterTrigger = trigger({\n  type: 'n8n-nodes-base.webhook',\n  version: 2.1,\n  config: { name: 'Trigger', position: [240, 200] },\n  output: [{ body: { severity: 'high' } }]\n});\n\nconst ifNode = node({\n  type: 'n8n-nodes-base.if',\n  version: 2.1,\n  config: { name: 'Check Severity', position: [540, 200], parameters: { conditions: { options: { caseSensitive: true, looseType: false }, conditions: [{ id: 'cond1', leftValue: '={{ .severity }}', rightValue: 'high', operator: { type: 'string', operation: 'equals' } }] } } },\n  output: [{ matched: true }]\n});\n\nconst emailNode = node({\n  type: 'n8n-nodes-base.emailSend',\n  version: 1.2,\n  config: { name: 'Send Email', position: [840, 200], parameters: { to: 'admin@example.com', subject: 'High Severity Alert', text: 'A high severity alert was triggered.' } },\n  output: [{ sent: true }]\n});\n\nexport default workflow('webhook-filter', 'Webhook Filter')\n  .add(filterTrigger)\n  .to(ifNode)\n  .to(emailNode);",
+    "description": "Receive a webhook, filter by condition, and send email if matched"
+  },
+  "telegram_alert": {
+    "name": "Telegram Alert",
+    "keywords": [
+      "telegram",
+      "alert",
+      "message",
+      "webhook",
+      "bot",
+      "notify"
+    ],
+    "code": "import { workflow, trigger, node } from '@n8n/workflow-sdk';\n\nconst telegramTrigger = trigger({\n  type: 'n8n-nodes-base.webhook',\n  version: 2.1,\n  config: { name: 'Trigger', position: [240, 200] },\n  output: [{ body: { message: 'Alert!' } }]\n});\n\nconst telegramNode = node({\n  type: 'n8n-nodes-base.telegram',\n  version: 1.1,\n  config: { name: 'Send Telegram', position: [640, 200], parameters: { chatId: '@mychannel', text: 'Alert from n8n!' } },\n  output: [{ sent: true }]\n});\n\nexport default workflow('telegram-alert', 'Telegram Alert')\n  .add(telegramTrigger)\n  .to(telegramNode);",
+    "description": "Send a Telegram message when a webhook is triggered"
+  }
+}

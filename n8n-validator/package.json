@@ -1,0 +1,13 @@
+{
+  "name": "n8n-local-validator",
+  "version": "1.0.0",
+  "description": "Local SDK validator for n8n workflows",
+  "main": "validate-sdk.js",
+  "dependencies": {
+    "@n8n/workflow-sdk": "^0.13.3"
+  },
+  "scripts": {
+    "validate": "node validate-sdk.js",
+    "build": "node workflow-builder-v2.js"
+  }
+}

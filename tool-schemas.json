@@ -1,0 +1,274 @@
+{
+  "unpublish_workflow": {
+    "properties": [
+      "workflowId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId"
+    ]
+  },
+  "add_data_table_column": {
+    "properties": [
+      "dataTableId",
+      "projectId",
+      "name",
+      "type"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "dataTableId",
+      "projectId",
+      "name",
+      "type"
+    ]
+  },
+  "get_execution": {
+    "properties": [
+      "workflowId",
+      "executionId",
+      "includeData",
+      "nodeNames",
+      "truncateData"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId",
+      "executionId"
+    ]
+  },
+  "search_workflows": {
+    "properties": [
+      "limit",
+      "query",
+      "projectId"
+    ],
+    "additionalProperties": false,
+    "required": null
+  },
+  "search_projects": {
+    "properties": [
+      "query",
+      "type",
+      "limit"
+    ],
+    "additionalProperties": false,
+    "required": null
+  },
+  "delete_data_table_column": {
+    "properties": [
+      "dataTableId",
+      "projectId",
+      "columnId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "dataTableId",
+      "projectId",
+      "columnId"
+    ]
+  },
+  "prepare_test_pin_data": {
+    "properties": [
+      "workflowId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId"
+    ]
+  },
+  "create_workflow_from_code": {
+    "properties": [
+      "code",
+      "name",
+      "description",
+      "projectId",
+      "folderId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "code"
+    ]
+  },
+  "add_data_table_rows": {
+    "properties": [
+      "dataTableId",
+      "projectId",
+      "rows"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "dataTableId",
+      "projectId",
+      "rows"
+    ]
+  },
+  "update_workflow": {
+    "properties": [
+      "workflowId",
+      "code",
+      "name",
+      "description"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId",
+      "code"
+    ]
+  },
+  "search_data_tables": {
+    "properties": [
+      "query",
+      "projectId",
+      "limit"
+    ],
+    "additionalProperties": false,
+    "required": null
+  },
+  "create_data_table": {
+    "properties": [
+      "projectId",
+      "name",
+      "columns"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "projectId",
+      "name",
+      "columns"
+    ]
+  },
+  "search_nodes": {
+    "properties": [
+      "queries"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "queries"
+    ]
+  },
+  "execute_workflow": {
+    "properties": [
+      "workflowId",
+      "executionMode",
+      "inputs"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId"
+    ]
+  },
+  "test_workflow": {
+    "properties": [
+      "workflowId",
+      "pinData",
+      "triggerNodeName"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId",
+      "pinData"
+    ]
+  },
+  "rename_data_table_column": {
+    "properties": [
+      "dataTableId",
+      "projectId",
+      "columnId",
+      "name"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "dataTableId",
+      "projectId",
+      "columnId",
+      "name"
+    ]
+  },
+  "get_suggested_nodes": {
+    "properties": [
+      "categories"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "categories"
+    ]
+  },
+  "search_folders": {
+    "properties": [
+      "projectId",
+      "query",
+      "limit"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "projectId"
+    ]
+  },
+  "archive_workflow": {
+    "properties": [
+      "workflowId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId"
+    ]
+  },
+  "get_workflow_details": {
+    "properties": [
+      "workflowId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId"
+    ]
+  },
+  "get_node_types": {
+    "properties": [
+      "nodeIds"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "nodeIds"
+    ]
+  },
+  "validate_workflow": {
+    "properties": [
+      "code"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "code"
+    ]
+  },
+  "publish_workflow": {
+    "properties": [
+      "workflowId",
+      "versionId"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "workflowId"
+    ]
+  },
+  "rename_data_table": {
+    "properties": [
+      "dataTableId",
+      "projectId",
+      "name"
+    ],
+    "additionalProperties": false,
+    "required": [
+      "dataTableId",
+      "projectId",
+      "name"
+    ]
+  },
+  "get_sdk_reference": {
+    "properties": [
+      "section"
+    ],
+    "additionalProperties": false,
+    "required": null
+  }
+}

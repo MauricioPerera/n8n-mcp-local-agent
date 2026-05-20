@@ -30,7 +30,7 @@ Load-ToolSchemas -schemaJsonPath "$PSScriptRoot\\tool-schemas.json"
 # ============================================================
 $global:EmbeddingCache = @{}
 $global:ToolEmbedCache = @()
-$global:N8nApiKey = $(if ($env:N8N_API_KEY) { $env:N8N_API_KEY } else { "YOUR_N8N_API_KEY_HERE" })
+$global:N8nApiKey = $(if ($env:N8N_API_KEY) { $env:N8N_API_KEY } else { "" })
 $global:N8nDomain = "https://ardf.dev"
 $global:HistoryPassword = $null
 $global:CredentialsCache = @()
@@ -52,7 +52,7 @@ function Load-LocalConfig {
                 if ($config.BearerToken -and ($global:BearerToken -eq "YOUR_N8N_MCP_BEARER_TOKEN_HERE" -or [string]::IsNullOrEmpty($global:BearerToken))) {
                     $global:BearerToken = $config.BearerToken
                 }
-                if ($config.N8nApiKey -and ($global:N8nApiKey -eq "YOUR_N8N_API_KEY_HERE" -or [string]::IsNullOrEmpty($global:N8nApiKey))) {
+                if ($config.N8nApiKey -and ($global:N8nApiKey -eq "YOUR_N8N_API_KEY_HERE" -or $global:N8nApiKey -eq "" -or [string]::IsNullOrEmpty($global:N8nApiKey))) {
                     $global:N8nApiKey = $config.N8nApiKey
                 }
                 if ($config.N8nDomain -and ($global:N8nDomain -eq "https://ardf.dev" -or [string]::IsNullOrEmpty($global:N8nDomain))) {
@@ -659,7 +659,7 @@ function Invoke-McpAgentLoop {
     $nodePath = "$PSScriptRoot\n8n-validator\execution-cache.js"
     $dbPath = "$PSScriptRoot\n8n-executions-db\executions.docs.json"
     
-    $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
+    $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey.Trim() -ne "" -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
     $domainValid = $global:N8nDomain -and $global:N8nDomain -ne ""
     
     if ($apiKeyValid -and $domainValid) {
@@ -852,9 +852,10 @@ function Invoke-McpAgentLoop {
                     continue
                 }
                 
-                $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
+                $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey.Trim() -ne "" -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
                 if (-not $apiKeyValid) {
-                    Write-Host "  [!] ERROR: Se requiere una API Key configurada para crear credenciales." -ForegroundColor Red
+                    Write-Host "  [!] ADVERTENCIA: La funcion de crear credenciales esta deshabilitada porque no se ha configurado una API Key de n8n." -ForegroundColor Yellow
+                    Write-Host "  HINT: Configura tu API Key usando '/apikey TU_API_KEY' o definiendo la variable de entorno `$env:N8N_API_KEY`." -ForegroundColor Cyan
                     continue
                 }
                 
@@ -1069,9 +1070,9 @@ function Invoke-McpAgentLoop {
                     }
                 }
                 
-                if (-not $syncKey) {
-                    Write-Host "  [!] ERROR: Se requiere una API Key para sincronizar con n8n." -ForegroundColor Red
-                    Write-Host "  HINT: Pasala directamente: '/history -sync TU_API_KEY' o configurala en `$env:N8N_API_KEY`." -ForegroundColor Yellow
+                if (-not $syncKey -or $syncKey.Trim() -eq "" -or $syncKey -eq "YOUR_N8N_API_KEY_HERE") {
+                    Write-Host "  [!] ADVERTENCIA: La sincronizacion del historial esta deshabilitada porque no se ha configurado una API Key de n8n." -ForegroundColor Yellow
+                    Write-Host "  HINT: Configura tu API Key usando '/apikey TU_API_KEY' o ejecutando '/history -sync TU_API_KEY'." -ForegroundColor Cyan
                     continue
                 }
                 
@@ -1230,9 +1231,10 @@ function Invoke-McpAgentLoop {
             if ($historyArgs -match '^-diagnose\s+(\S+)') {
                 $execId = $matches[1]
                 
-                $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
+                $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey.Trim() -ne "" -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
                 if (-not $apiKeyValid) {
-                    Write-Host "  [!] ERROR: Se requiere una API Key configurada para diagnosticar ejecuciones." -ForegroundColor Red
+                    Write-Host "  [!] ADVERTENCIA: El diagnostico de ejecuciones esta deshabilitado porque no se ha configurado una API Key de n8n." -ForegroundColor Yellow
+                    Write-Host "  HINT: Configura tu API Key usando '/apikey TU_API_KEY' o definiendo la variable de entorno `$env:N8N_API_KEY`." -ForegroundColor Cyan
                     continue
                 }
                 

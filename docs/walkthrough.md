@@ -1,6 +1,6 @@
 # Walkthrough: Sistemas Completados y Batería de Pruebas
 
-He completado con éxito la programación de todos los sistemas solicitados y he implementado y verificado una batería de pruebas automatizadas para garantizar su correcto funcionamiento.
+He completado con éxito la programación de todos los sistemas solicitados y he implementado y verificado una batería de pruebas automatizadas y funcionales para garantizar su correcto funcionamiento.
 
 ---
 
@@ -14,6 +14,16 @@ Permite al agente almacenar y gestionar variables globales localmente e inyectar
 
 ### B. Integración Fluida de Data Tables
 Un interceptor dinámico en PowerShell pausa las peticiones del MCP dirigidas al CRUD de Data Tables (como `create_data_table` o `add_data_table_column`) y autocompleta el identificador técnico `projectId` consultando primero el Home Project del espacio de trabajo del usuario de forma transparente.
+
+### C. API Key de n8n Completamente Opcional (Nuevo)
+Hicimos que la API Key de n8n (`N8nApiKey`) sea completamente opcional para permitir inicializar el cliente de forma limpia sin bloqueos.
+1. **Inicialización Limpia**: Si no se proporciona la variable de entorno `N8N_API_KEY` ni existe una clave en `config.json`, el cliente interactivo se inicializa correctamente y reporta la clave como `No configurada` en `/status`.
+2. **Sincronización Silenciosa Condicionada**: La sincronización automática en segundo plano se omite silenciosamente si no se tiene una clave válida configurada.
+3. **Deshabilitación Elegante de Comandos**: Si el usuario intenta ejecutar funciones dependientes de la API de n8n sin una clave configurada, el cliente las bloquea mostrando una advertencia clara en color amarillo y un consejo (`HINT`) instructivo en cian:
+   - `/history -sync`: Muestra advertencia e indica cómo pasarla directamente o configurarla.
+   - `/history -diagnose`: Muestra advertencia e indica cómo habilitarla dinámicamente.
+   - `/credentials -create`: Deshabilita el comando de creación y da indicaciones de configuración.
+4. **Activación Dinámica**: En cualquier momento, el usuario puede habilitar todas estas funciones ingresando `/apikey TU_API_KEY` directamente en la sesión interactiva, guardándose de forma enmascarada y en caliente en `config.json`.
 
 ---
 
@@ -40,11 +50,13 @@ Durante la fase de verificación y ejecución de la suite de pruebas, identifica
 1. **Compatibilidad de Firma del SDK de n8n**: Corregimos el caso de prueba en Node.js para pasar el argumento obligatorio de nombre de workflow (`workflow('id', 'Nombre')`), cumpliendo estrictamente con las reglas de `@n8n/workflow-sdk`.
 2. **Soporte Multilingüe en Clasificación**: Ampliamos la expresión regular del clúster `DATA_TABLES` en `mcp-client-n8n-final.ps1` para dar soporte a términos en español (`tabla`/`tablas`), permitiendo que comandos como *"agrega una columna a la tabla"* se clasifiquen correctamente.
 3. **Robustez en Rutas de PowerShell**: Modificamos el reemplazo dinámico de `$PSScriptRoot` en los scripts de prueba para utilizar reemplazo de cadena literal (`.Replace()`) en lugar de expresiones regulares, lo que previno conflictos sintácticos con caracteres de escape y comillas simples en entornos Windows.
+4. **Verificación Unitaria Offline de la API Key**: Creamos y ejecutamos una suite de verificación offline (`test-offline.ps1`) que valida que al no contar con una API Key, el cliente muestre de forma exacta las advertencias, enmascare correctamente las claves de `/status` en caso de existir, y bloquee ordenadamente las funciones de sincronización y credenciales.
 
 ---
 
 ## 4. Resultados de la Verificación
 
+### Pruebas Unitarias de Funciones de Negocio (`run-tests.cmd`)
 Al ejecutar el script maestro unificado `run-tests.cmd`, todas las pruebas se ejecutan y pasan satisfactoriamente:
 
 ```
@@ -69,4 +81,21 @@ TESTS FINALIZADOS
 ===================================
 ```
 
-Tanto el sistema de variables KV como el soporte integrado para Data Tables están listos para producción y plenamente respaldados por pruebas automatizadas.
+### Pruebas Offline de API Key Opcional (`test-offline.ps1`)
+La suite de pruebas offline confirmó el correcto funcionamiento de los nuevos guardrails ante la ausencia de una API Key:
+```
+=== INICIANDO VERIFICACION OFFLINE DE API KEY OPCIONAL ===
+  [config] Configuracion cargada desde cache local config.json.
+[info] Cliente MCP cargado offline.
+OK Test 1: La API Key se identifica correctamente como NO valida cuando esta vacia.
+OK Test 2: /status mostro 'No configurada' correctamente.
+OK Test 3: /history -sync mostro advertencia y HINT de deshabilitacion correctamente.
+OK Test 4: /history -diagnose mostro advertencia y HINT correctamente.
+OK Test 5: /credentials -create mostro advertencia y HINT correctamente.
+OK Test 6: La API Key se identifica correctamente como VALIDA despues de ser configurada.
+OK Test 7: /status enmascaro la clave configurada correctamente.
+
+=== TODAS LAS PRUEBAS OFFLINE PASARON CORRECTAMENTE ===
+```
+
+Tanto el sistema de variables KV, la integración de Data Tables, y el nuevo soporte de inicio offline con API Key opcional están listos para producción y plenamente respaldados por pruebas.

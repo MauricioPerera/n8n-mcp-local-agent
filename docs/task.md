@@ -1,16 +1,18 @@
-# Checklist: Batería de Pruebas Automatizadas
+# Checklist: API Key de n8n Opcional
 
-## 1. Pruebas Node.js (`test-suite.js`)
-- `[x]` **Refactorización mínima**: Exportar `validateLocal`, `stripImports` de `workflow-builder.js` para que puedan ser requeridos. Exportar `fillSlotsWithKV` de `update-workflow.js`.
-- `[x]` **Test: validateLocal**: Verificar que detecte código válido e inválido (ej. con `import`).
-- `[x]` **Test: stripImports**: Verificar que remueva imports de ES6.
-- `[x]` **Test: fillSlotsWithKV**: Verificar la correcta sustitución de `__KV_xxx__` con valores reales.
+## 1. Modificar Cliente MCP (`mcp-client-n8n-final.ps1`)
+- `[x]` Cambiar el valor por defecto de `$global:N8nApiKey` de `"YOUR_N8N_API_KEY_HERE"` a `""`.
+- `[x]` Modificar `Load-LocalConfig` para que no use el placeholder en las comparaciones de carga.
+- `[x]` Definir y validar `$apiKeyValid` considerando valores nulos, vacíos o el antiguo placeholder.
+- `[x]` Condicionar la sincronización en segundo plano al arrancar el cliente (`$canSync`) para omitirse si la clave no está configurada.
 
-## 2. Pruebas PowerShell (`test-suite.ps1`)
-- `[x]` **Test: Regex Clustering**: Aislar `Get-ClusterByRegex` y el array `$ClusterPatterns`.
-- `[x]` Validar que frases como *"crea una data table"* caen en `DATA_TABLES`.
-- `[x]` Validar que frases de workflow caen en `WORKFLOW_BUILD` o `WORKFLOW_MGMT`.
-- `[x]` **Test: Data Table Regex**: Validar que la regex usada en la línea 1457 de `mcp-client-n8n-final.ps1` (`$toolName -match 'data_table' -and $toolName -ne 'search_data_tables'`) hace match correctamente a las herramientas deseadas y no a `search_data_tables`.
+## 2. Condicionar Comandos en el Bucle Interactivo
+- `[x]` Condicionar el comando `/history -sync` para mostrar una advertencia clara y un HINT si la clave no está configurada.
+- `[x]` Condicionar el comando `/history -diagnose` para mostrar una advertencia y HINT si no se tiene una clave válida.
+- `[x]` Condicionar el comando `/credentials -create` para mostrar advertencia y HINT en ausencia de la clave.
 
-## 3. Script Maestro (`run-tests.cmd`)
-- `[x]` Crear script CMD para ejecutar ambas suites y presentar los resultados unificados.
+## 3. Verificación y Regresión
+- `[x]` Ejecutar las pruebas manuales offline (sin API Key).
+- `[x]` Ejecutar comandos `/apikey` de forma dinámica para validar que se guarden y reactiven las funciones.
+- `[x]` Ejecutar el script `run-tests.cmd` para asegurar que las pruebas unitarias pasan al 100%.
+- `[x]` Guardar la documentación e implementation plan en el repositorio y subir los cambios a GitHub.

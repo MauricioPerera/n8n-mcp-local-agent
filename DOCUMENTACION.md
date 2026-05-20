@@ -74,7 +74,7 @@ Se han añadido funciones internas en PowerShell y comandos especiales en la con
 ### 🔹 Funciones de PowerShell
 Estas funciones pueden invocarse en el script interactivo o desde otros módulos de automatización:
 1. **`Set-McpToken -Token <token>`**: Establece el token Bearer para autenticación contra el servidor MCP.
-2. **`Set-N8nApiKey -ApiKey <key>`**: Define la API Key de n8n para realizar llamadas REST de sincronización.
+2. **`Set-N8nApiKey -ApiKey <key>`**: Define la API Key de n8n para realizar llamadas REST de sincronización (totalmente opcional; si no se provee, las funciones de sincronización se deshabilitan elegantemente sin afectar el resto del sistema).
 3. **`Set-N8nDomain -Domain <url>`**: Establece el dominio o base URL de n8n (ej. `https://ardf.dev`). Cuenta con auto-completado de protocolo (`https://` por defecto) y eliminación de diagonales finales.
 
 ### 🔹 Slash Commands Interactivos
@@ -105,7 +105,7 @@ La primera vez, o para cambiar tu contraseña de cifrado, ingresa:
 *Si la base de datos estaba en plano, se migrará automáticamente.*
 
 ### 2. Sincronizar el Historial Incrementalmente
-Trae los últimos datos de ejecuciones y nombres de workflows desde el servidor remoto a tu base local en disco (usando la API Key y dominio definidos):
+Trae los últimos datos de ejecuciones y nombres de workflows desde el servidor remoto a tu base local en disco (requiere la API Key y dominio de n8n configurados; de lo contrario, mostrará una advertencia clara):
 ```bash
 /history -sync
 ```

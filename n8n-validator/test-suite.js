@@ -1,25 +1,6 @@
-const fs = require('fs');
-const path = require('path');
 const assert = require('assert');
-const { parseWorkflowCode } = require('@n8n/workflow-sdk');
-
-// 1. Load builder and update scripts as strings
-const builderStr = fs.readFileSync(path.join(__dirname, 'workflow-builder.js'), 'utf8');
-const updateStr = fs.readFileSync(path.join(__dirname, 'update-workflow.js'), 'utf8');
-
-// 2. Extract functions
-const validateLocalCode = builderStr.match(/function validateLocal\([\s\S]*?\n}/)[0];
-const stripImportsCode = builderStr.match(/function stripImports\([\s\S]*?\n}/)[0];
-const fillSlotsWithKVCode = updateStr.match(/function fillSlotsWithKV\([\s\S]*?\n}/)[0];
-
-// Eval them into this context
-eval(validateLocalCode);
-eval(stripImportsCode);
-// Mock varsCache for fillSlotsWithKV
-var varsCache = {
-    "email_soporte": { value: "soporte@empresa.com", workflows: [] }
-};
-eval(fillSlotsWithKVCode);
+const { validateLocal, stripImports } = require("./workflow-builder-v2");
+const { fillSlotsWithKV } = require("./update-workflow");
 
 console.log("=== BATERIA DE TESTS NODE.js ===");
 
@@ -58,7 +39,10 @@ try {
     const slotValues = {
         "email_to": "__KV_email_soporte__"
     };
-    const filled = fillSlotsWithKV(templateCode, slotValues);
+    const mockVarsCache = {
+        "email_soporte": { value: "soporte@empresa.com", workflows: [] }
+    };
+    const filled = fillSlotsWithKV(templateCode, slotValues, mockVarsCache);
     assert.ok(filled.includes('const email = "soporte@empresa.com"'), "fillSlotsWithKV no inyectó el valor correcto de la caché: " + filled);
     console.log("✅ fillSlotsWithKV: OK");
 } catch (e) {

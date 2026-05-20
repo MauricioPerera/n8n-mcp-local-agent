@@ -40,6 +40,64 @@ $global:LocalWorkflowsCache = @{}
 # ============================================================
 # PERSISTENCIA DE CONFIGURACION LOCAL (CACHE SEGURO)
 # ============================================================
+function Protect-Secret($secret) {
+    if ([string]::IsNullOrEmpty($secret) -or $secret -eq "YOUR_N8N_MCP_BEARER_TOKEN_HERE" -or $secret -eq "YOUR_N8N_API_KEY_HERE") { return $secret }
+    try {
+        Add-Type -AssemblyName System.Security
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($secret)
+        $entropy = [System.Text.Encoding]::UTF8.GetBytes("n8n-mcp-local-entropy")
+        $protectedBytes = [System.Security.Cryptography.ProtectedData]::Protect($bytes, $entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+        $base64 = [System.Convert]::ToBase64String($protectedBytes)
+        return "DPAPI:$base64"
+    } catch {
+        # Fallback XOR encryption
+        $xorKey = "n8nMcpSecretXorKey!"
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($secret)
+        $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($xorKey)
+        $xorBytes = New-Object byte[] $bytes.Length
+        for ($i = 0; $i -lt $bytes.Length; $i++) {
+            $xorBytes[$i] = $bytes[$i] -bxor $keyBytes[$i % $keyBytes.Length]
+        }
+        $base64 = [System.Convert]::ToBase64String($xorBytes)
+        return "XOR:$base64"
+    }
+}
+
+function Unprotect-Secret($protectedSecret) {
+    if ([string]::IsNullOrEmpty($protectedSecret)) { return "" }
+    if ($protectedSecret.StartsWith("DPAPI:")) {
+        try {
+            Add-Type -AssemblyName System.Security
+            $base64 = $protectedSecret.Substring(6)
+            $protectedBytes = [System.Convert]::FromBase64String($base64)
+            $entropy = [System.Text.Encoding]::UTF8.GetBytes("n8n-mcp-local-entropy")
+            $unprotectedBytes = [System.Security.Cryptography.ProtectedData]::Unprotect($protectedBytes, $entropy, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+            return [System.Text.Encoding]::UTF8.GetString($unprotectedBytes)
+        } catch {
+            Write-Warning "DPAPI decryption failed, returning empty"
+            return ""
+        }
+    } elseif ($protectedSecret.StartsWith("XOR:")) {
+        try {
+            $base64 = $protectedSecret.Substring(4)
+            $xorBytes = [System.Convert]::FromBase64String($base64)
+            $xorKey = "n8nMcpSecretXorKey!"
+            $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($xorKey)
+            $bytes = New-Object byte[] $xorBytes.Length
+            for ($i = 0; $i -lt $xorBytes.Length; $i++) {
+                $bytes[$i] = $xorBytes[$i] -bxor $keyBytes[$i % $keyBytes.Length]
+            }
+            return [System.Text.Encoding]::UTF8.GetString($bytes)
+        } catch {
+            Write-Warning "XOR decryption failed, returning empty"
+            return ""
+        }
+    } else {
+        # Retrocompatibilidad: texto plano original
+        return $protectedSecret
+    }
+}
+
 function Load-LocalConfig {
     $configPath = "$PSScriptRoot\n8n-executions-db\config.json"
     if (Test-Path $configPath) {
@@ -50,16 +108,16 @@ function Load-LocalConfig {
                     $global:McpServerUrl = $config.McpServerUrl
                 }
                 if ($config.BearerToken -and ($global:BearerToken -eq "YOUR_N8N_MCP_BEARER_TOKEN_HERE" -or [string]::IsNullOrEmpty($global:BearerToken))) {
-                    $global:BearerToken = $config.BearerToken
+                    $global:BearerToken = Unprotect-Secret $config.BearerToken
                 }
                 if ($config.N8nApiKey -and ($global:N8nApiKey -eq "YOUR_N8N_API_KEY_HERE" -or $global:N8nApiKey -eq "" -or [string]::IsNullOrEmpty($global:N8nApiKey))) {
-                    $global:N8nApiKey = $config.N8nApiKey
+                    $global:N8nApiKey = Unprotect-Secret $config.N8nApiKey
                 }
                 if ($config.N8nDomain -and ($global:N8nDomain -eq "https://ardf.dev" -or [string]::IsNullOrEmpty($global:N8nDomain))) {
                     $global:N8nDomain = $config.N8nDomain
                 }
                 if ($config.HistoryPassword -and [string]::IsNullOrEmpty($global:HistoryPassword)) {
-                    $global:HistoryPassword = $config.HistoryPassword
+                    $global:HistoryPassword = Unprotect-Secret $config.HistoryPassword
                 }
                 if ($config.CredentialsCache) {
                     $global:CredentialsCache = $config.CredentialsCache
@@ -97,10 +155,10 @@ function Save-LocalConfig {
     
     $config = @{
         McpServerUrl        = $global:McpServerUrl
-        BearerToken         = $global:BearerToken
-        N8nApiKey           = $global:N8nApiKey
+        BearerToken         = Protect-Secret $global:BearerToken
+        N8nApiKey           = Protect-Secret $global:N8nApiKey
         N8nDomain           = $global:N8nDomain
-        HistoryPassword     = $global:HistoryPassword
+        HistoryPassword     = Protect-Secret $global:HistoryPassword
         CredentialsCache    = $global:CredentialsCache
         VariablesCache      = $global:VariablesCache
         LocalWorkflowsCache = $global:LocalWorkflowsCache
@@ -204,12 +262,26 @@ function Send-McpRequest($Method, $Params = $null) {
     $headers = @{ "Authorization" = "Bearer $global:BearerToken"; "Content-Type" = "application/json"; "Accept" = "application/json, text/event-stream" }
     try {
         $resp = Invoke-RestMethod -Uri $global:McpServerUrl -Method Post -Body $json -Headers $headers -TimeoutSec 20
-        $lines = $resp -split "`n"
-        foreach ($line in $lines) {
-            if ($line -match '^data:\s*(.+)$') {
-                $obj = ($matches[1] | ConvertFrom-Json)
+        if ($resp -is [System.Management.Automation.PSCustomObject] -or $resp -is [System.Collections.IDictionary]) {
+            if ($resp.error) { Write-Warning "MCP Error: $($resp.error.message)"; return $null }
+            if ($resp.result) { return $resp.result }
+            return $resp
+        } elseif ($resp -is [string]) {
+            $lines = $resp -split "`n"
+            foreach ($line in $lines) {
+                if ($line -match '^data:\s*(.+)$') {
+                    $obj = ($matches[1] | ConvertFrom-Json)
+                    if ($obj.error) { Write-Warning "MCP Error: $($obj.error.message)"; return $null }
+                    if ($obj.result) { return $obj.result }
+                }
+            }
+        } else {
+            $respStr = $resp | Out-String
+            if ($respStr.Trim().StartsWith("{")) {
+                $obj = $respStr | ConvertFrom-Json
                 if ($obj.error) { Write-Warning "MCP Error: $($obj.error.message)"; return $null }
                 if ($obj.result) { return $obj.result }
+                return $obj
             }
         }
         return $null
@@ -476,7 +548,7 @@ function Show-HistoryResult($Type, $Result) {
 # ============================================================
 function Invoke-CreateWorkflowWithValidation() {
     Write-Host "  [builder] Generando workflow desde template..." -ForegroundColor DarkGray
-    $nodePath = "$PSScriptRoot\n8n-validator\workflow-builder.js"
+    $nodePath = "$PSScriptRoot\n8n-validator\workflow-builder-v2.js"
     $templatesPath = "$PSScriptRoot\workflow-templates.json"
     $output = node $nodePath "$templatesPath" "$global:McpServerUrl" "$global:BearerToken" "$query" 2>&1
     # El output mezcla logs + JSON final. Extraer la ultima linea JSON.

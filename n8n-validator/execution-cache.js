@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { DocStore, FileStorageAdapter, EncryptedAdapter } = require("d:/repos/js-doc-store/js-doc-store.js");
+const { DocStore, FileStorageAdapter, EncryptedAdapter } = require("../../js-doc-store/js-doc-store.js");
 
 // Database directory
 const DB_DIR = path.join(__dirname, "../n8n-executions-db");

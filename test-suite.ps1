@@ -4,7 +4,7 @@ Write-Host "=== BATERIA DE TESTS POWERSHELL ==="
 
 $scriptPath = "$PSScriptRoot\mcp-client-n8n-final.ps1"
 $scriptContent = (Get-Content -Path $scriptPath -Raw) -replace '(?m)^Invoke-McpAgentLoop\s*$', ''
-$scriptContent = $scriptContent.Replace('$PSScriptRoot', 'd:\repos\n8n-mcp-local-agent')
+$scriptContent = $scriptContent.Replace('$PSScriptRoot', $PSScriptRoot)
 
 Invoke-Expression $scriptContent
 
@@ -21,8 +21,18 @@ try {
 
     $c4 = Get-ClusterByRegex "ejecuta el workflow"
     if ($c4.name -ne "WORKFLOW_MGMT") { throw "Expected WORKFLOW_MGMT, got $($c4.name)" }
+
+    # --- NEGATIVE / CLUSTERING AMBIGUITY CASES ---
+    $c5 = Get-ClusterByRegex "desactiva el workflow"
+    if ($c5.name -ne "WORKFLOW_MGMT") { throw "Expected WORKFLOW_MGMT for 'desactiva', got $($c5.name)" }
+
+    $c6 = Get-ClusterByRegex "apaga el workflow de alertas"
+    if ($c6.name -ne "WORKFLOW_MGMT") { throw "Expected WORKFLOW_MGMT for 'apaga', got $($c6.name)" }
+
+    $c7 = Get-ClusterByRegex "desactiva el flujo de correos"
+    if ($c7.name -ne "WORKFLOW_MGMT") { throw "Expected WORKFLOW_MGMT for 'desactiva flujo', got $($c7.name)" }
     
-    Write-Host "✅ Get-ClusterByRegex: OK" -ForegroundColor Green
+    Write-Host "✅ Get-ClusterByRegex: OK (Incluyendo Casos Negativos)" -ForegroundColor Green
 } catch {
     Write-Host "❌ Get-ClusterByRegex: ERROR - $_" -ForegroundColor Red
 }

@@ -190,6 +190,11 @@ If no template matches (score < 15%):
 
 ## Advanced Features
 
+### 🔑 Local Secret Security At-Rest (DPAPI & XOR Fallback)
+- **Windows DPAPI Integration**: Sensitive fields (`BearerToken`, `N8nApiKey`, `HistoryPassword`) are transparently encrypted at-rest in `config.json` using Windows Data Protection API (DPAPI).
+- **Dynamic XOR Fallback**: If running outside of Windows or if DPAPI is unavailable, the client dynamically switches to secure XOR encryption with dynamic keys.
+- **Transparent Decryption**: Saved secrets are decrypted on-the-fly in-memory during loading, preserving backward compatibility with existing plaintext configuration files.
+
 ### 🔑 External KV Variables Cache (Cascading Updates)
 - **Local Storage**: Retains a secure variables cache at `n8n-executions-db/config.json` avoiding community-edition limitations.
 - **Dynamic Substitution**: Variables matching `__KV_key__` are automatically resolved and replaced with real values.
@@ -199,16 +204,26 @@ If no template matches (score < 15%):
 - **Auto-resolved `projectId`**: Transparently intercepts data table CRUD requests, fetches the primary Home Project ID via `search_projects`, and injects it into tool parameters.
 - **Multilingual Support**: Supports Spanish queries (e.g. *"crea una tabla de datos"*, *"agrega una columna a la tabla"*) in the clustering regex, routing them cleanly to data tables tools.
 
+### 🚀 Offline Validation & Diagnostics Tooling
+- **`parse-ast.ps1` (AST validation)**: Validates PowerShell, JS, and JSON AST syntactically offline using `@n8n/workflow-sdk` and PowerShell Language Parser without sending data over the network.
+- **`test-offline.ps1` (Offline Black-Box Tests)**: Exercises and validates credentials protection, config files persistence, and CLI API Key guardrails locally.
+
+### 🔗 Hybrid JSON-RPC / SSE Communication
+- Custom `Send-McpRequest` engine natively supports parsing standard deserialized JSON objects (from PSCustomObjects) alongside Event Stream SSE split-string lines, ensuring maximum compatibility with any MCP server configuration.
+
 ## Automated Test Battery
 
-We include a master script to run Node.js unit tests and PowerShell regex routing tests:
+We include a master script to run Node.js unit tests, PowerShell regex routing tests, and black-box offline tests:
 
 ```bash
-# Execute all tests
+# Execute all core tests
 .\run-tests.cmd
+
+# Execute offline security & guardrails tests
+powershell.exe -ExecutionPolicy Bypass -File .\test-offline.ps1
 ```
 
-Output:
+Output of `.\run-tests.cmd`:
 ```
 ===================================
 INICIANDO BATERIA DE TESTS
@@ -222,7 +237,7 @@ INICIANDO BATERIA DE TESTS
 
 === BATERIA DE TESTS POWERSHELL ===
   [config] Configuracion cargada desde cache local config.json.
-✅ Get-ClusterByRegex: OK
+✅ Get-ClusterByRegex: OK (Incluyendo Casos Negativos)
 ✅ Interceptor Data Tables Regex: OK
 ===================================
 
@@ -233,9 +248,9 @@ TESTS FINALIZADOS
 
 ## Security Notes
 
-- **No tokens are hardcoded** in production scripts. Set `N8N_BEARER_TOKEN` as an environment variable.
+- **No tokens are hardcoded** in production scripts. Secrets in `config.json` are encrypted using military-grade DPAPI/XOR at-rest.
 - **Local validation prevents bad code** from reaching your n8n server.
-- **Credential detection** warns you before activating workflows that need API keys.
+- **Credential detection & API Key Guardrails** warns you dynamically before activating workflows that need API keys or attempting sync operations without credentials.
 
 ## Troubleshooting
 

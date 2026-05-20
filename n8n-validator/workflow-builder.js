@@ -14,6 +14,17 @@ function loadTemplates() {
     return JSON.parse(raw.replace(/^\uFEFF/, ""));
 }
 
+function getLocalConfig() {
+    const configPath = path.join(__dirname, "../n8n-executions-db/config.json");
+    if (!fs.existsSync(configPath)) return {};
+    try {
+        const raw = fs.readFileSync(configPath, "utf8");
+        return JSON.parse(raw.replace(/^\uFEFF/, ""));
+    } catch (e) {
+        return {};
+    }
+}
+
 function detectSlots(templateCode) {
     const slots = [];
     const patterns = [
@@ -29,9 +40,24 @@ function detectSlots(templateCode) {
     return slots;
 }
 
-function fillSlots(templateCode, slotValues) {
+function fillSlots(templateCode, slotValues, variables = {}) {
     let filled = templateCode;
-    for (const [key, val] of Object.entries(slotValues)) {
+    for (const [key, rawVal] of Object.entries(slotValues)) {
+        let val = rawVal;
+        
+        // Resolve variable in the deployed code
+        if (val && typeof val === "string" && val.startsWith("__KV_")) {
+            let k = val.substring(5);
+            if (k.endsWith("__")) k = k.substring(0, k.length - 2);
+            if (variables[k]) {
+                val = variables[k].value;
+            }
+        }
+        
+        if (typeof val === "string") {
+            val = val.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+        }
+
         const pattern = new RegExp("(" + key + ")\\s*:\\s*['\"]([^'\"]+)['\"]", "g");
         filled = filled.replace(pattern, "$1: '" + val + "'");
     }
@@ -154,21 +180,8 @@ async function sendMcp(method, params) {
     return null;
 }
 
-function getLocalConfig() {
-    const configPath = path.join(__dirname, "../n8n-executions-db/config.json");
-    if (!fs.existsSync(configPath)) return {};
-    try {
-        const raw = fs.readFileSync(configPath, "utf8");
-        return JSON.parse(raw.replace(/^\uFEFF/, ""));
-    } catch (e) {
-        return {};
-    }
-}
-
 async function autoLinkCredentials(code, query) {
     const config = getLocalConfig();
-
-    
     const credCache = config.CredentialsCache || [];
     if (credCache.length === 0) {
         return { code, linked: [] };
@@ -189,18 +202,15 @@ async function autoLinkCredentials(code, query) {
     let linked = [];
     
     for (const [nodeType, credType] of Object.entries(CREDENTIAL_MAPPING)) {
-        // Look for all credentials matching the type
         let matchingCreds = credCache.filter(c => c.type === credType);
         if (matchingCreds.length === 0) continue;
         
-        // Strict filtering by Alias
         const qLower = (query || "").toLowerCase();
         const aliasMatches = matchingCreds.filter(c => c.alias && qLower.includes(c.alias.toLowerCase()));
         if (aliasMatches.length > 0) {
             matchingCreds = aliasMatches;
             console.log(`[auto-link] Alias detectado en la query. Filtrando credenciales a ${matchingCreds.length} coincidencia(s).`);
         } else {
-            // Strict filtering by Environment (Assume Prod unless sandbox/test is explicitly mentioned)
             const wantsSandbox = qLower.includes("sandbox") || qLower.includes("test");
             const envMatches = matchingCreds.filter(c => {
                 const e = c.env ? c.env.toLowerCase() : "prod";
@@ -215,7 +225,6 @@ async function autoLinkCredentials(code, query) {
         
         let matchedCred = matchingCreds[0];
         
-        // If there are multiple, ask LLM to pick the best based on context
         if (matchingCreds.length > 1) {
             console.log(`[auto-link] Multiples credenciales encontradas para ${credType}. Consultando LLM...`);
             const options = matchingCreds.map((c, idx) => `ID: ${idx}, Name: ${c.name}, Context: ${c.context || 'General'}`).join("\n");
@@ -247,7 +256,6 @@ async function autoLinkCredentials(code, query) {
             }
         }
         
-        // Match both single/double quotes and allow trailing whitespace
         const regexStr = "type:\\s*['\"]" + nodeType + "['\"]\\s*,?";
         const regex = new RegExp(regexStr, "i");
         
@@ -274,24 +282,25 @@ async function main() {
     
     let code, name, description, templateId, finalSlotValues;
     
+    const config = getLocalConfig();
+    const varsObj = config.VariablesCache || {};
+    const varKeys = Object.keys(varsObj);
+
     if (match) {
         const template = match.template;
         console.log("    Template: " + template.name);
         const slots = detectSlots(template.code);
         console.log("    Slots to extract: " + slots.join(", "));
         
-        const config = getLocalConfig();
-        const varsObj = config.VariablesCache || {};
-        const varKeys = Object.keys(varsObj);
-        
         console.log(`    Extracting slots via micro LLM (with ${varKeys.length} variables available)...`);
         const slotValues = await extractSlots(QUERY, slots, varKeys);
         for (const [k, v] of Object.entries(slotValues)) console.log("    " + k + " = " + v);
         
-        code = fillSlots(template.code, slotValues);
+        // Pass VariablesCache for code deployment
+        code = fillSlots(template.code, slotValues, varsObj);
         name = template.name;
         description = template.description;
-        templateId = match.template.id || match.template.name;
+        templateId = match.key || template.name;
         finalSlotValues = slotValues;
     } else {
         console.log("    No semantic template match. Using LLM fallback...");
@@ -328,7 +337,18 @@ async function main() {
     });
     
     if (mcpResult && mcpResult.content) {
-        const text = mcpResult.content.filter(c => c.type === "text").map(c => c.text).join("\n");
+        let text = mcpResult.content.filter(c => c.type === "text").map(c => c.text).join("\n");
+        
+        // Inject templateId and slotValues to the response JSON so that the client maps dependencies
+        try {
+            const parsed = JSON.parse(text);
+            if (templateId) parsed.templateId = templateId;
+            if (finalSlotValues) parsed.slotValues = finalSlotValues;
+            text = JSON.stringify(parsed);
+        } catch (e) {
+            // Leave unchanged if not JSON
+        }
+        
         console.log(JSON.stringify({ 
             success: true, 
             mcpResponse: text, 
@@ -343,4 +363,15 @@ async function main() {
     }
 }
 
-main().catch(e => console.log(JSON.stringify({ error: e.message })));
+if (require.main === module) {
+    main().catch(e => console.log(JSON.stringify({ error: e.message })));
+} else {
+    module.exports = {
+        validateLocal,
+        stripImports,
+        fillSlots,
+        detectSlots,
+        autoLinkCredentials,
+        getLocalConfig
+    };
+}

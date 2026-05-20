@@ -21,12 +21,26 @@ function Send-McpRequest($Method, $Params = $null) {
     $headers = @{ "Authorization" = "Bearer $global:BearerToken"; "Content-Type" = "application/json"; "Accept" = "application/json, text/event-stream" }
     try {
         $resp = Invoke-RestMethod -Uri $global:McpServerUrl -Method Post -Body $json -Headers $headers -TimeoutSec 20
-        $lines = $resp -split "`n"
-        foreach ($line in $lines) {
-            if ($line -match '^data:\s*(.+)$') {
-                $obj = ($matches[1] | ConvertFrom-Json)
+        if ($resp -is [System.Management.Automation.PSCustomObject] -or $resp -is [System.Collections.IDictionary]) {
+            if ($resp.error) { return @{ error = $resp.error } }
+            if ($resp.result) { return $resp.result }
+            return $resp
+        } elseif ($resp -is [string]) {
+            $lines = $resp -split "`n"
+            foreach ($line in $lines) {
+                if ($line -match '^data:\s*(.+)$') {
+                    $obj = ($matches[1] | ConvertFrom-Json)
+                    if ($obj.error) { return @{ error = $obj.error } }
+                    if ($obj.result) { return $obj.result }
+                }
+            }
+        } else {
+            $respStr = $resp | Out-String
+            if ($respStr.Trim().StartsWith("{")) {
+                $obj = $respStr | ConvertFrom-Json
                 if ($obj.error) { return @{ error = $obj.error } }
                 if ($obj.result) { return $obj.result }
+                return $obj
             }
         }
         return $null
@@ -35,7 +49,7 @@ function Send-McpRequest($Method, $Params = $null) {
 
 function Invoke-CreateWorkflowV3($query) {
     Write-Host "  [v3] Template matching + Local validation + Deploy..." -ForegroundColor DarkGray
-    $output = node "$PSScriptRoot\n8n-validator\workflow-builder.js" "$PSScriptRoot\workflow-templates.json" "$global:McpServerUrl" "$global:BearerToken" "$query" 2>&1
+    $output = node "$PSScriptRoot\n8n-validator\workflow-builder-v2.js" "$PSScriptRoot\workflow-templates.json" "$global:McpServerUrl" "$global:BearerToken" "$query" 2>&1
     $lines = $output -split "`n"
     $jsonLine = $null
     for ($i = $lines.Count - 1; $i -ge 0; $i--) {

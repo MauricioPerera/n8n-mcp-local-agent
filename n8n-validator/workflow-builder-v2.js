@@ -1,4 +1,5 @@
 const fs = require("fs");
+const path = require("path");
 const { parseWorkflowCode } = require("@n8n/workflow-sdk");
 const { syncTemplates, matchTemplate, extractSlots } = require("./vector-cache");
 
@@ -11,6 +12,17 @@ const OLLAMA_MODEL = process.argv[6] || "qwen2.5:0.5b";
 function loadTemplates() {
     const raw = fs.readFileSync(TEMPLATES_PATH, "utf8");
     return JSON.parse(raw.replace(/^\uFEFF/, ""));
+}
+
+function getLocalConfig() {
+    const configPath = path.join(__dirname, "../n8n-executions-db/config.json");
+    if (!fs.existsSync(configPath)) return {};
+    try {
+        const raw = fs.readFileSync(configPath, "utf8");
+        return JSON.parse(raw.replace(/^\uFEFF/, ""));
+    } catch (e) {
+        return {};
+    }
 }
 
 function detectSlots(templateCode) {
@@ -28,9 +40,24 @@ function detectSlots(templateCode) {
     return slots;
 }
 
-function fillSlots(templateCode, slotValues) {
+function fillSlots(templateCode, slotValues, variables = {}) {
     let filled = templateCode;
-    for (const [key, val] of Object.entries(slotValues)) {
+    for (const [key, rawVal] of Object.entries(slotValues)) {
+        let val = rawVal;
+        
+        // Resolve variable in the deployed code
+        if (val && typeof val === "string" && val.startsWith("__KV_")) {
+            let k = val.substring(5);
+            if (k.endsWith("__")) k = k.substring(0, k.length - 2);
+            if (variables[k]) {
+                val = variables[k].value;
+            }
+        }
+        
+        if (typeof val === "string") {
+            val = val.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+        }
+
         const pattern = new RegExp("(" + key + ")\\s*:\\s*['\"]([^'\"]+)['\"]", "g");
         filled = filled.replace(pattern, "$1: '" + val + "'");
     }
@@ -116,7 +143,8 @@ async function sendMcp(method, params) {
     if (BEARER === "dryrun") {
         console.log("[dry-run] Simulating MCP response...");
         try {
-            const cleaned = stripImports(params.code);
+            const actualCode = params.arguments ? params.arguments.code : params.code;
+            const cleaned = stripImports(actualCode);
             const json = parseWorkflowCode(cleaned);
             const nodeCount = json.nodes ? json.nodes.length : 0;
             return {
@@ -152,6 +180,96 @@ async function sendMcp(method, params) {
     return null;
 }
 
+async function autoLinkCredentials(code, query) {
+    const config = getLocalConfig();
+    const credCache = config.CredentialsCache || [];
+    if (credCache.length === 0) {
+        return { code, linked: [] };
+    }
+    
+    const CREDENTIAL_MAPPING = {
+        "n8n-nodes-base.slack": "slackApi",
+        "n8n-nodes-base.emailsend": "smtp",
+        "n8n-nodes-base.googlesheets": "googleSheetsOAuth2Api",
+        "n8n-nodes-base.notion": "notionApi",
+        "n8n-nodes-base.telegram": "telegramApi",
+        "n8n-nodes-base.discord": "discordBotApi",
+        "n8n-nodes-base.jira": "jiraSoftwareCloudApi",
+        "n8n-nodes-base.pagerdutytrigger": "pagerDutyApi"
+    };
+    
+    let modifiedCode = code;
+    let linked = [];
+    
+    for (const [nodeType, credType] of Object.entries(CREDENTIAL_MAPPING)) {
+        let matchingCreds = credCache.filter(c => c.type === credType);
+        if (matchingCreds.length === 0) continue;
+        
+        const qLower = (query || "").toLowerCase();
+        const aliasMatches = matchingCreds.filter(c => c.alias && qLower.includes(c.alias.toLowerCase()));
+        if (aliasMatches.length > 0) {
+            matchingCreds = aliasMatches;
+            console.log(`[auto-link] Alias detectado en la query. Filtrando credenciales a ${matchingCreds.length} coincidencia(s).`);
+        } else {
+            const wantsSandbox = qLower.includes("sandbox") || qLower.includes("test");
+            const envMatches = matchingCreds.filter(c => {
+                const e = c.env ? c.env.toLowerCase() : "prod";
+                return wantsSandbox ? (e === "sandbox" || e === "test") : (e === "prod");
+            });
+            
+            if (envMatches.length > 0) {
+                matchingCreds = envMatches;
+                console.log(`[auto-link] Entorno detectado (${wantsSandbox ? 'sandbox' : 'prod'}). Filtrando credenciales a ${matchingCreds.length} coincidencia(s).`);
+            }
+        }
+        
+        let matchedCred = matchingCreds[0];
+        
+        if (matchingCreds.length > 1) {
+            console.log(`[auto-link] Multiples credenciales encontradas para ${credType}. Consultando LLM...`);
+            const options = matchingCreds.map((c, idx) => `ID: ${idx}, Name: ${c.name}, Context: ${c.context || 'General'}`).join("\n");
+            const prompt = `Which credential best matches this user query?\nUser Query: "${query}"\n\nOptions:\n${options}\n\nReply ONLY with the single integer ID (e.g., 0, 1, 2) that best matches. Do not include any other text.`;
+            
+            try {
+                const body = JSON.stringify({
+                    model: OLLAMA_MODEL,
+                    messages: [{ role: "user", content: prompt }],
+                    stream: false,
+                    options: { num_predict: 10, temperature: 0.1 }
+                });
+                const resp = await fetch("http://localhost:11434/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body
+                });
+                const data = await resp.json();
+                if (data && data.message && data.message.content) {
+                    const ans = data.message.content.trim();
+                    const chosenIdx = parseInt(ans.replace(/[^0-9]/g, ''), 10);
+                    if (!isNaN(chosenIdx) && chosenIdx >= 0 && chosenIdx < matchingCreds.length) {
+                        matchedCred = matchingCreds[chosenIdx];
+                        console.log(`[auto-link] LLM eligio la credencial: ${matchedCred.name}`);
+                    }
+                }
+            } catch (e) {
+                console.log(`[auto-link] LLM error, default to first: ${e.message}`);
+            }
+        }
+        
+        const regexStr = "type:\\s*['\"]" + nodeType + "['\"]\\s*,?";
+        const regex = new RegExp(regexStr, "i");
+        
+        if (regex.test(modifiedCode)) {
+            const replacement = `type: '${nodeType}',\n  credentials: {\n    ${credType}: {\n      id: '${matchedCred.id}',\n      name: '${matchedCred.name}'\n    }\n  },`;
+            modifiedCode = modifiedCode.replace(regex, replacement);
+            linked.push({ nodeType, credType, name: matchedCred.name, id: matchedCred.id });
+            console.log(`[auto-link] Vinculada credencial '${matchedCred.name}' (${credType}) a nodo ${nodeType}`);
+        }
+    }
+    
+    return { code: modifiedCode, linked };
+}
+
 async function main() {
     console.log("[1] Loading templates...");
     const templates = loadTemplates();
@@ -162,21 +280,28 @@ async function main() {
     console.log("[3] Matching query: " + QUERY);
     const match = await matchTemplate(QUERY, templates);
     
-    let code, name, description;
+    let code, name, description, templateId, finalSlotValues;
     
+    const config = getLocalConfig();
+    const varsObj = config.VariablesCache || {};
+    const varKeys = Object.keys(varsObj);
+
     if (match) {
         const template = match.template;
         console.log("    Template: " + template.name);
         const slots = detectSlots(template.code);
         console.log("    Slots to extract: " + slots.join(", "));
         
-        console.log("    Extracting slots via micro LLM...");
-        const slotValues = await extractSlots(QUERY, slots);
+        console.log(`    Extracting slots via micro LLM (with ${varKeys.length} variables available)...`);
+        const slotValues = await extractSlots(QUERY, slots, varKeys);
         for (const [k, v] of Object.entries(slotValues)) console.log("    " + k + " = " + v);
         
-        code = fillSlots(template.code, slotValues);
+        // Pass VariablesCache for code deployment
+        code = fillSlots(template.code, slotValues, varsObj);
         name = template.name;
         description = template.description;
+        templateId = match.key || template.name;
+        finalSlotValues = slotValues;
     } else {
         console.log("    No semantic template match. Using LLM fallback...");
         const generated = await generateWithLLM(QUERY);
@@ -201,6 +326,10 @@ async function main() {
         for (const cn of validation.credentialNodes) console.log("      - " + cn.name + " (" + cn.type + ")");
     }
     
+    console.log("[4.5] Auto-linking local credentials...");
+    const linkResult = await autoLinkCredentials(code, QUERY);
+    code = linkResult.code;
+    
     console.log("[5] Deploying via MCP...");
     const mcpResult = await sendMcp("tools/call", {
         name: "create_workflow_from_code",
@@ -208,8 +337,25 @@ async function main() {
     });
     
     if (mcpResult && mcpResult.content) {
-        const text = mcpResult.content.filter(c => c.type === "text").map(c => c.text).join("\n");
-        console.log(JSON.stringify({ success: true, mcpResponse: text, requiresCredentials: validation.requiresCredentials, credentialNodes: validation.credentialNodes }));
+        let text = mcpResult.content.filter(c => c.type === "text").map(c => c.text).join("\n");
+        
+        // Inject templateId and slotValues to the response JSON so that the client maps dependencies
+        try {
+            const parsed = JSON.parse(text);
+            if (templateId) parsed.templateId = templateId;
+            if (finalSlotValues) parsed.slotValues = finalSlotValues;
+            text = JSON.stringify(parsed);
+        } catch (e) {
+            // Leave unchanged if not JSON
+        }
+        
+        console.log(JSON.stringify({ 
+            success: true, 
+            mcpResponse: text, 
+            requiresCredentials: validation.requiresCredentials, 
+            credentialNodes: validation.credentialNodes,
+            linkedCredentials: linkResult.linked
+        }));
     } else if (mcpResult && mcpResult.error) {
         console.log(JSON.stringify({ success: false, error: mcpResult.error.message }));
     } else {
@@ -217,4 +363,15 @@ async function main() {
     }
 }
 
-main().catch(e => console.log(JSON.stringify({ error: e.message })));
+if (require.main === module) {
+    main().catch(e => console.log(JSON.stringify({ error: e.message })));
+} else {
+    module.exports = {
+        validateLocal,
+        stripImports,
+        fillSlots,
+        detectSlots,
+        autoLinkCredentials,
+        getLocalConfig
+    };
+}

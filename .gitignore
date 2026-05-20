@@ -32,3 +32,4 @@ benchmark*.json
 # Databases
 n8n-executions-db/
 n8n-vector-db/
+scratch/

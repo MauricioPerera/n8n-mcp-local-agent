@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { VectorStore } = require("d:/repos/js-vector-store/js-vector-store.js");
+const { VectorStore } = require("../../js-vector-store/js-vector-store.js");
 
 const OLLAMA_URL = "http://localhost:11434";
 const EMBED_MODEL = "embeddinggemma:latest";

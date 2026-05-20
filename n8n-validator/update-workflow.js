@@ -6,45 +6,44 @@ const bearerToken = process.argv[3];
 const targetKey = process.argv[4];
 
 if (!mcpServerUrl || !bearerToken || !targetKey) {
-    console.error("Usage: node update-workflow.js <mcpServerUrl> <bearerToken> <key>");
-    process.exit(1);
+    if (require.main === module) {
+        console.error("Usage: node update-workflow.js <mcpServerUrl> <bearerToken> <key>");
+        process.exit(1);
+    }
 }
 
 const configPath = path.join(__dirname, "../n8n-executions-db/config.json");
-if (!fs.existsSync(configPath)) {
-    console.error("No config.json found.");
-    process.exit(1);
-}
-
 let config = {};
-try {
-    const raw = fs.readFileSync(configPath, "utf8");
-    config = JSON.parse(raw.replace(/^\uFEFF/, ""));
-} catch (e) {
-    console.error("Failed to parse config.json: " + e.message);
-    process.exit(1);
+if (fs.existsSync(configPath)) {
+    try {
+        const raw = fs.readFileSync(configPath, "utf8");
+        config = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    } catch (e) {
+        if (require.main === module) {
+            console.error("Failed to parse config.json: " + e.message);
+            process.exit(1);
+        }
+    }
 }
 
 const varsCache = config.VariablesCache || {};
 const localWorkflows = config.LocalWorkflowsCache || {};
 const templatesPath = path.join(__dirname, "../workflow-templates.json");
-let templates = [];
+let templates = {};
 try {
     templates = JSON.parse(fs.readFileSync(templatesPath, "utf8"));
 } catch (e) {
-    console.error("Failed to read templates: " + e.message);
-    process.exit(1);
+    if (require.main === module) {
+        console.error("Failed to read templates: " + e.message);
+        process.exit(1);
+    }
 }
 
-if (!varsCache[targetKey] || !varsCache[targetKey].workflows) {
-    console.log(`No workflows depend on '${targetKey}'.`);
-    process.exit(0);
-}
+const dependentWorkflows = varsCache[targetKey] ? (varsCache[targetKey].workflows || []) : [];
 
-const dependentWorkflows = varsCache[targetKey].workflows;
-
-function fillSlotsWithKV(code, slotValues) {
+function fillSlotsWithKV(code, slotValues, customVars = null) {
     let result = code;
+    const activeVars = customVars || varsCache;
     for (const [key, rawVal] of Object.entries(slotValues)) {
         let val = rawVal;
         // Check if value is a KV reference
@@ -52,8 +51,8 @@ function fillSlotsWithKV(code, slotValues) {
             let k = val.substring(5);
             if (k.endsWith("__")) k = k.substring(0, k.length - 2);
             
-            if (varsCache[k]) {
-                val = varsCache[k].value;
+            if (activeVars[k]) {
+                val = activeVars[k].value;
             } else {
                 val = ""; // fallback
             }
@@ -64,8 +63,13 @@ function fillSlotsWithKV(code, slotValues) {
             val = val.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
         }
         
-        const regex = new RegExp(`{{${key}}}`, "g");
-        result = result.replace(regex, val);
+        // 1. Literal slot filling: key: 'val'
+        const literalPattern = new RegExp("(" + key + ")\\s*:\\s*['\"]([^'\"]+)['\"]", "g");
+        result = result.replace(literalPattern, "$1: '" + val + "'");
+        
+        // 2. Mustache-style placeholders: {{key}}
+        const mustachePattern = new RegExp(`{{${key}}}`, "g");
+        result = result.replace(mustachePattern, val);
     }
     return result;
 }
@@ -134,6 +138,11 @@ async function sendMcp(method, params) {
 }
 
 async function main() {
+    if (dependentWorkflows.length === 0) {
+        console.log(`No workflows depend on '${targetKey}'.`);
+        process.exit(0);
+    }
+
     let successCount = 0;
     for (const wId of dependentWorkflows) {
         const wfCache = localWorkflows[wId];
@@ -145,7 +154,18 @@ async function main() {
         const templateId = wfCache.templateId;
         const slotValues = wfCache.slotValues;
         
-        const template = templates.find(t => (t.id === templateId || t.name === templateId));
+        // Corrected robust template lookup
+        let template = templates[templateId];
+        if (!template) {
+            const foundEntry = Object.entries(templates).find(([key, tmpl]) => 
+                key.toLowerCase() === templateId.toLowerCase() || 
+                (tmpl.name && tmpl.name.toLowerCase() === templateId.toLowerCase())
+            );
+            if (foundEntry) {
+                template = foundEntry[1];
+            }
+        }
+
         if (!template) {
             console.log(`[WARN] Template '${templateId}' not found for workflow ${wId}.`);
             continue;
@@ -161,10 +181,15 @@ async function main() {
             code: code
         };
         
-        const resp = await sendMcp("update_workflow", mcpParams);
+        // Corrected standard JSON-RPC tools/call method invocation
+        const resp = await sendMcp("tools/call", {
+            name: "update_workflow",
+            arguments: mcpParams
+        });
+
         if (resp.error) {
             console.error(`[ERROR] Failed to update workflow ${wId}:`, resp.error.message);
-        } else if (resp.result) {
+        } else {
             console.log(`[OK] Workflow ${wId} updated successfully.`);
             successCount++;
         }
@@ -172,4 +197,11 @@ async function main() {
     console.log(`Cascade update complete. Updated ${successCount}/${dependentWorkflows.length} workflows.`);
 }
 
-main().catch(e => console.error(e));
+if (require.main === module) {
+    main().catch(e => console.error(e));
+} else {
+    module.exports = {
+        fillSlotsWithKV,
+        autoLinkCredentialsCode
+    };
+}

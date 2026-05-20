@@ -131,5 +131,49 @@ Filtra por campos específicos gracias a los índices pre-construidos en disco:
 
 ---
 
+## 🔑 5. Sistema de Variables KV Externo (Propagación en Cascada)
+
+Para sortear las limitaciones de variables globales en la versión Community de n8n, el cliente implementa un sistema externo de variables Clave-Valor (KV):
+
+* **Almacenamiento Local**: Guardadas en el caché de variables seguro en `n8n-executions-db/config.json`.
+* **Inyección en Flujos**: El validador y generador de código detectan tokens de variables como `__KV_nombre_variable__` y los reemplazan dinámicamente con sus valores actuales.
+* **Propagación en Cascada (Cascading Update)**: Al modificar el valor de una variable a través de `/variables -set <key> <value>`, el script `update-workflow.js` de Node.js:
+  1. Identifica de forma automática y precisa todos los flujos que consumen dicha variable.
+  2. Descarga y extrae el template de código original de cada flujo.
+  3. Reemplaza todos los tokens `__KV_...__` con los nuevos valores actualizados.
+  4. Realiza el auto-vinculado de credenciales del flujo.
+  5. Ejecuta llamadas al MCP remoto (`update_workflow`) para sobrescribir directamente los flujos en la instancia remota de n8n de manera inmediata.
+
+---
+
+## 📊 6. Interceptor de Data Tables (Soporte Multilingüe)
+
+El cliente intercepta de forma inteligente las llamadas del MCP que involucren el CRUD de tablas de datos (`create_data_table`, `add_data_table_column`, etc.):
+
+* **Resolución Automática de `projectId`**: El LLM local carece de contexto acerca del `projectId` técnico remoto. El interceptor realiza una llamada silenciosa a `search_projects`, extrae el identificador del proyecto principal del usuario, e inyecta dinámicamente este ID en los argumentos de la herramienta de forma transparente.
+* **Soporte Multilingüe (Español/Inglés)**: La expresión regular del clúster `DATA_TABLES` soporta términos en español (como `"tabla"` o `"tablas"`), lo que permite procesar solicitudes directas en español (por ejemplo, *"crea una tabla de datos"* o *"agrega una columna a la tabla"*) dirigiéndolas correctamente al set de herramientas de Data Tables.
+
+---
+
+## 🧪 7. Batería de Pruebas Automatizadas (`run-tests.cmd`)
+
+Hemos implementado un conjunto robusto de pruebas unificadas para garantizar la estabilidad del sistema:
+
+* **Node.js Suite (`n8n-validator/test-suite.js`)**:
+  - `stripImports`: Verifica la remoción limpia de directivas ES6 sin afectar el código ejecutable.
+  - `validateLocal`: Asegura que el validador estricto de `@n8n/workflow-sdk` detecte flujos inválidos y valide firmas correctas (como `workflow('id', 'Nombre')`).
+  - `fillSlotsWithKV`: Garantiza el reemplazo correcto de tokens de caché KV.
+* **PowerShell Suite (`test-suite.ps1`)**:
+  - `Get-ClusterByRegex`: Valida el clasificador regex de lenguaje natural frente a frases complejas en español e inglés.
+  - `Interceptor Data Tables Regex`: Verifica que el filtro del interceptor capture adecuadamente las herramientas CRUD de tablas y excluya búsquedas auxiliares.
+* **Orquestador Principal (`run-tests.cmd`)**: ejecuta y unifica la salida de ambas suites de prueba de forma estructurada.
+
+Para ejecutar la batería de pruebas en cualquier momento, corre desde la terminal:
+```bash
+.\run-tests.cmd
+```
+
+---
+
 > [!NOTE]
-> Todos los cambios han sido validados utilizando el validador AST sintáctico (`parse-ast.ps1`), garantizando 0 errores sintácticos en entornos Windows con PowerShell 5.1 y PowerShell 7+.
+> Todos los cambios han sido validados utilizando el validador AST sintáctico (`parse-ast.ps1`) y la batería de tests unificada (`run-tests.cmd`), garantizando 0 errores sintácticos en entornos Windows con PowerShell 5.1 y PowerShell 7+.

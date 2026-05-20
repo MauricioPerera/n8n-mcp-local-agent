@@ -33,14 +33,97 @@ $global:ToolEmbedCache = @()
 $global:N8nApiKey = $(if ($env:N8N_API_KEY) { $env:N8N_API_KEY } else { "YOUR_N8N_API_KEY_HERE" })
 $global:N8nDomain = "https://ardf.dev"
 $global:HistoryPassword = $null
+$global:CredentialsCache = @()
+$global:VariablesCache = @{}
+$global:LocalWorkflowsCache = @{}
+
+# ============================================================
+# PERSISTENCIA DE CONFIGURACION LOCAL (CACHE SEGURO)
+# ============================================================
+function Load-LocalConfig {
+    $configPath = "$PSScriptRoot\n8n-executions-db\config.json"
+    if (Test-Path $configPath) {
+        try {
+            $config = Get-Content -Raw -Path $configPath -Encoding UTF8 | ConvertFrom-Json
+            if ($config) {
+                if ($config.McpServerUrl -and ($global:McpServerUrl -eq "https://your-n8n-instance.com/mcp-server/http" -or [string]::IsNullOrEmpty($global:McpServerUrl))) {
+                    $global:McpServerUrl = $config.McpServerUrl
+                }
+                if ($config.BearerToken -and ($global:BearerToken -eq "YOUR_N8N_MCP_BEARER_TOKEN_HERE" -or [string]::IsNullOrEmpty($global:BearerToken))) {
+                    $global:BearerToken = $config.BearerToken
+                }
+                if ($config.N8nApiKey -and ($global:N8nApiKey -eq "YOUR_N8N_API_KEY_HERE" -or [string]::IsNullOrEmpty($global:N8nApiKey))) {
+                    $global:N8nApiKey = $config.N8nApiKey
+                }
+                if ($config.N8nDomain -and ($global:N8nDomain -eq "https://ardf.dev" -or [string]::IsNullOrEmpty($global:N8nDomain))) {
+                    $global:N8nDomain = $config.N8nDomain
+                }
+                if ($config.HistoryPassword -and [string]::IsNullOrEmpty($global:HistoryPassword)) {
+                    $global:HistoryPassword = $config.HistoryPassword
+                }
+                if ($config.CredentialsCache) {
+                    $global:CredentialsCache = $config.CredentialsCache
+                } else {
+                    $global:CredentialsCache = @()
+                }
+                if ($config.VariablesCache) {
+                    $global:VariablesCache = $config.VariablesCache
+                } else {
+                    $global:VariablesCache = @{}
+                }
+                if ($config.LocalWorkflowsCache) {
+                    $global:LocalWorkflowsCache = $config.LocalWorkflowsCache
+                } else {
+                    $global:LocalWorkflowsCache = @{}
+                }
+                Write-Host "  [config] Configuracion cargada desde cache local config.json." -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Warning "No se pudo cargar la configuracion local: $_"
+        }
+    } else {
+        $global:CredentialsCache = @()
+        $global:VariablesCache = @{}
+        $global:LocalWorkflowsCache = @{}
+    }
+}
+
+function Save-LocalConfig {
+    $configPath = "$PSScriptRoot\n8n-executions-db\config.json"
+    $dbDir = "$PSScriptRoot\n8n-executions-db"
+    if (-not (Test-Path $dbDir)) {
+        New-Item -ItemType Directory -Path $dbDir -Force | Out-Null
+    }
+    
+    $config = @{
+        McpServerUrl        = $global:McpServerUrl
+        BearerToken         = $global:BearerToken
+        N8nApiKey           = $global:N8nApiKey
+        N8nDomain           = $global:N8nDomain
+        HistoryPassword     = $global:HistoryPassword
+        CredentialsCache    = $global:CredentialsCache
+        VariablesCache      = $global:VariablesCache
+        LocalWorkflowsCache = $global:LocalWorkflowsCache
+    }
+    
+    try {
+        $json = $config | ConvertTo-Json -Depth 10 -Compress
+        Set-Content -Path $configPath -Value $json -Encoding UTF8 -Force
+    } catch {
+        Write-Warning "No se pudo guardar la configuracion local: $_"
+    }
+}
+
+# Cargar la configuracion automaticamente al iniciar
+Load-LocalConfig
 
 $ClusterPatterns = @(
-    @{ name = "WORKFLOW_BUILD";    pattern = '(?i)\b(create|build|make|write|save\s*new|new|validate|check|verify|sdk|docs|reference)\b.*\b(workflow|code)\b|\b(workflow|code)\b.*\b(create|build|make|new|from\s*code|sdk|validate|check|verify|docs|reference)\b'; tools = @("create_workflow_from_code", "update_workflow", "validate_workflow", "get_sdk_reference") }
-    @{ name = "TESTING";           pattern = '(?i)\b(test|mock|simulate|dry\s*run|pin\s*data|preview)\b(?!.*\b(activate|deactivate|unpublish|publish|archive|turn\s*on|turn\s*off)\b).*\b(workflow|execution|node)\b|\b(workflow|execution|node)\b.*\b(test|mock|simulate|dry\s*run|pin\s*data|preview)\b(?!.*\b(activate|deactivate|unpublish|publish|archive|turn\s*on|turn\s*off)\b)'; tools = @("test_workflow", "prepare_test_pin_data") }
-    @{ name = "DATA_TABLES";       pattern = '(?i)\bdata\s*table|tables?\b.*\b(create|add|rename|delete|search|list|insert|rows?|column|columns)\b|\b(create|add|rename|delete|search|list|insert)\b.*\b(data\s*table|tables?)\b'; tools = @("search_data_tables", "create_data_table", "rename_data_table", "add_data_table_column", "delete_data_table_column", "rename_data_table_column", "add_data_table_rows") }
-    @{ name = "NODES_DISCOVERY";   pattern = '(?i)\b(nodes?|node\b).*\b(find|search|recommend|type|suggest|use|for|which|what)\b|\b(find|search|recommend|suggest)\b.*\b(nodes?|node\b)'; tools = @("search_nodes", "get_node_types", "get_suggested_nodes") }
-    @{ name = "WORKFLOW_MGMT";     pattern = '(?i)\b(workflow)\b.*\b(list|search|find|run|execute|activate|turn\s*on|turn\s*off|deactivate|details|describe|archive|delete|remove|get)\b|\b(list|search|find|run|execute|activate|deactivate|archive)\b.*\b(workflow)\b'; tools = @("search_workflows", "get_workflow_details", "execute_workflow", "get_execution", "publish_workflow", "unpublish_workflow", "archive_workflow") }
-    @{ name = "PROJECTS";          pattern = '(?i)\b(project|folder|projects|folders)\b'; tools = @("search_projects", "search_folders") }
+    @{ name = "WORKFLOW_BUILD";    pattern = '(?i)\b(crea|crear|create|build|make|write|save\s*new|new|validate|check|verify|sdk|docs|reference)\b.*\b(workflow|code|flujo)\b|\b(workflow|code|flujo)\b.*\b(crea|crear|create|build|make|new|from\s*code|sdk|validate|check|verify|docs|reference)\b'; tools = @("create_workflow_from_code", "update_workflow", "validate_workflow", "get_sdk_reference") }
+    @{ name = "TESTING";           pattern = '(?i)\b(test|mock|simulate|dry\s*run|pin\s*data|preview|prueba)\b(?!.*\b(activate|deactivate|unpublish|publish|archive|turn\s*on|turn\s*off)\b).*\b(workflow|execution|node|flujo)\b|\b(workflow|execution|node|flujo)\b.*\b(test|mock|simulate|dry\s*run|pin\s*data|preview|prueba)\b(?!.*\b(activate|deactivate|unpublish|publish|archive|turn\s*on|turn\s*off)\b)'; tools = @("test_workflow", "prepare_test_pin_data") }
+    @{ name = "DATA_TABLES";       pattern = '(?i)\b(data\s*table|tables?|tablas?)\b.*\b(crea|crear|agrega|agregar|create|add|rename|delete|search|list|insert|rows?|column|columns)\b|\b(crea|crear|agrega|agregar|create|add|rename|delete|search|list|insert)\b.*\b(data\s*table|tables?|tablas?)\b'; tools = @("search_data_tables", "create_data_table", "rename_data_table", "add_data_table_column", "delete_data_table_column", "rename_data_table_column", "add_data_table_rows") }
+    @{ name = "NODES_DISCOVERY";   pattern = '(?i)\b(nodes?|node|nodos?\b).*\b(find|search|recommend|type|suggest|use|for|which|what|busca|buscar)\b|\b(find|search|recommend|suggest|busca|buscar)\b.*\b(nodes?|node|nodos?\b)'; tools = @("search_nodes", "get_node_types", "get_suggested_nodes") }
+    @{ name = "WORKFLOW_MGMT";     pattern = '(?i)\b(workflow|flujo)\b.*\b(list|search|find|run|execute|activate|turn\s*on|turn\s*off|deactivate|details|describe|archive|delete|remove|get|ejecuta|ejecutar|lista|listar|detalles)\b|\b(list|search|find|run|execute|activate|deactivate|archive|ejecuta|ejecutar|lista|listar|detalles)\b.*\b(workflow|flujo)\b'; tools = @("search_workflows", "get_workflow_details", "execute_workflow", "get_execution", "publish_workflow", "unpublish_workflow", "archive_workflow") }
+    @{ name = "PROJECTS";          pattern = '(?i)\b(project|folder|projects|folders|proyecto|proyectos|carpeta)\b'; tools = @("search_projects", "search_folders") }
 )
 
 $OptimizedDescriptions = @{
@@ -81,6 +164,7 @@ function Set-McpToken {
     )
     $global:BearerToken = $Token
     Write-Host "  [config] MCP Bearer Token actualizado correctamente." -ForegroundColor Green
+    Save-LocalConfig
 }
 
 function Set-N8nApiKey {
@@ -90,6 +174,7 @@ function Set-N8nApiKey {
     )
     $global:N8nApiKey = $ApiKey
     Write-Host "  [config] API Key de n8n actualizada correctamente." -ForegroundColor Green
+    Save-LocalConfig
 }
 
 function Set-N8nDomain {
@@ -106,6 +191,7 @@ function Set-N8nDomain {
     }
     $global:N8nDomain = $cleanDomain
     Write-Host "  [config] Dominio de n8n configurado como: $global:N8nDomain" -ForegroundColor Green
+    Save-LocalConfig
 }
 
 # ============================================================
@@ -336,13 +422,13 @@ function Show-HistoryResult($Type, $Result) {
     if ($Type -eq "stats") {
         $data = $Result.data
         if (-not $data -or $data.Count -eq 0) {
-            Write-Host "  No hay estadísticas disponibles. Sincroniza primero usando '/history -sync'." -ForegroundColor Yellow
+            Write-Host "  No hay estadisticas disponibles. Sincroniza primero usando '/history -sync'." -ForegroundColor Yellow
             return
         }
         
         Write-Host ""
         Write-Host "  +=========================================================================================+" -ForegroundColor Cyan
-        Write-Host "  |                                ESTADÍSTICAS DE WORKFLOWS                                |" -ForegroundColor Cyan
+        Write-Host "  |                                ESTADISTICAS DE WORKFLOWS                                |" -ForegroundColor Cyan
         Write-Host "  +=========================================================================================+" -ForegroundColor Cyan
         Write-Host "  | Workflow Name                 | Total Runs | Success % | Failed %  | Avg Duration (s) |" -ForegroundColor Cyan
         Write-Host "  +===============================+============+===========+===========+==================+" -ForegroundColor Cyan
@@ -417,14 +503,86 @@ function Invoke-CreateWorkflowWithValidation() {
         Write-Host "  Name: Nombre:   $($mcpParsed.name)" -ForegroundColor White
         Write-Host "  Status: Nodos:    $($mcpParsed.nodeCount)" -ForegroundColor White
         Write-Host "  Connections: URL:      $($mcpParsed.url)" -ForegroundColor White
-        if ($result.requiresCredentials) {
+        
+        if ($result.linkedCredentials -and $result.linkedCredentials.Count -gt 0) {
             Write-Host ""
-            Write-Host "  WARNING:  CREDENCIALES REQUERIDAS:" -ForegroundColor Yellow
+            Write-Host "  INFO: CREDENCIALES AUTO-VINCULADAS DESDE CACHE LOCAL:" -ForegroundColor Cyan
+            $cacheUpdated = $false
+            foreach ($lc in $result.linkedCredentials) {
+                Write-Host "     * $($lc.name) ($($lc.credType)) -> Nodo: $($lc.nodeType)" -ForegroundColor Cyan
+                
+                if ($lc.id) {
+                    foreach ($c in $global:CredentialsCache) {
+                        if ($c.id -eq $lc.id) {
+                            if (-not $c.workflows) { $c.workflows = @() }
+                            if ($c.workflows -notcontains $mcpParsed.workflowId) {
+                                $c.workflows += $mcpParsed.workflowId
+                                $cacheUpdated = $true
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+            
+            if ($mcpParsed.templateId -and $mcpParsed.slotValues) {
+                $hasKV = $false
+                $sv = $mcpParsed.slotValues
+                foreach ($key in $sv.PSObject.Properties.Name) {
+                    $val = $sv.$key
+                    if ($val -and $val -match '^__KV_(.+)$') {
+                        $kvKey = $matches[1]
+                        $hasKV = $true
+                        if (-not $global:VariablesCache.ContainsKey($kvKey)) {
+                            $global:VariablesCache[$kvKey] = @{ value = ""; workflows = @() }
+                        }
+                        if ($global:VariablesCache[$kvKey].workflows -notcontains $mcpParsed.workflowId) {
+                            $global:VariablesCache[$kvKey].workflows += $mcpParsed.workflowId
+                        }
+                    }
+                }
+                if ($hasKV) {
+                    $global:LocalWorkflowsCache[$mcpParsed.workflowId] = @{
+                        templateId = $mcpParsed.templateId
+                        slotValues = $mcpParsed.slotValues
+                    }
+                    $cacheUpdated = $true
+                    Write-Host "  [KV] Workflow vinculado a variables locales." -ForegroundColor Magenta
+                }
+            }
+            
+            if ($cacheUpdated) {
+                Save-LocalConfig
+            }
+        }
+        
+        # Identificar nodos cuyas credenciales aun no estan vinculadas
+        $unlinkedNodes = @()
+        if ($result.requiresCredentials -and $result.credentialNodes) {
             foreach ($cn in $result.credentialNodes) {
+                $isLinked = $false
+                if ($result.linkedCredentials) {
+                    foreach ($lc in $result.linkedCredentials) {
+                        if ($cn.type.ToLower().StartsWith($lc.nodeType.ToLower()) -or $cn.type.ToLower().Contains($lc.nodeType.ToLower())) {
+                            $isLinked = $true
+                            break
+                        }
+                    }
+                }
+                if (-not $isLinked) {
+                    $unlinkedNodes += $cn
+                }
+            }
+        }
+        
+        if ($unlinkedNodes.Count -gt 0) {
+            Write-Host ""
+            Write-Host "  WARNING: CREDENCIALES REQUERIDAS (NO VINCULADAS AUN):" -ForegroundColor Yellow
+            foreach ($cn in $unlinkedNodes) {
                 Write-Host "     * $($cn.name) ($($cn.type))" -ForegroundColor Yellow
             }
             Write-Host ""
-            Write-Host "  HINT: Configura las credenciales en n8n antes de activar este workflow." -ForegroundColor Cyan
+            Write-Host "  HINT: Crea estas credenciales usando '/credentials -create <type> <name> <data>' para auto-vincularlas en el futuro." -ForegroundColor Cyan
         }
         return $mcpParsed
     }
@@ -494,6 +652,49 @@ function Invoke-McpAgentLoop {
     $wfMap = Get-WorkflowMap
     Write-Host "[n8n] $($wfMap.Count) workflows mapeados por nombre" -ForegroundColor Green
 
+    # Sincronizacion silenciosa en segundo plano al arrancar
+    $canSync = $false
+    $syncArgs = @()
+    
+    $nodePath = "$PSScriptRoot\n8n-validator\execution-cache.js"
+    $dbPath = "$PSScriptRoot\n8n-executions-db\executions.docs.json"
+    
+    $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
+    $domainValid = $global:N8nDomain -and $global:N8nDomain -ne ""
+    
+    if ($apiKeyValid -and $domainValid) {
+        $dbEncrypted = $false
+        if (Test-Path $dbPath) {
+            $rawDb = Get-Content -Path $dbPath -Raw -Encoding UTF8
+            if ($rawDb -and $rawDb.Contains("__enc")) {
+                $dbEncrypted = $true
+            }
+        }
+        
+        if ($dbEncrypted) {
+            if ($global:HistoryPassword) {
+                $syncArgs += "secure"
+                $syncArgs += $global:HistoryPassword
+                $canSync = $true
+            }
+        } else {
+            $canSync = $true
+        }
+    }
+    
+    if ($canSync) {
+        $syncArgs += "sync"
+        $syncArgs += $global:N8nApiKey
+        $syncArgs += $global:N8nDomain
+        
+        Write-Host "  [sync] Iniciando sincronizacion en segundo plano..." -ForegroundColor DarkGray
+        try {
+            Start-Process -FilePath "node" -ArgumentList $syncArgs -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -CreateNoWindow
+        } catch {
+            Write-Warning "No se pudo iniciar la sincronizacion en segundo plano: $_"
+        }
+    }
+
     Show-Logo -toolCount $allTools.Count
 
     while ($true) {
@@ -519,9 +720,14 @@ function Invoke-McpAgentLoop {
             Write-Host "    /status                 - Mostrar configuracion actual" -ForegroundColor White
             Write-Host "    /history -sync [<key>]  - Sincroniza ejecuciones y workflows de n8n" -ForegroundColor White
             Write-Host "    /history -list [<limit>]- Lista las ejecuciones almacenadas localmente" -ForegroundColor White
-            Write-Host "    /history -stats         - Muestra métricas agregadas por workflow" -ForegroundColor White
+            Write-Host "    /history -stats         - Muestra metricas agregadas por workflow" -ForegroundColor White
             Write-Host "    /history -filter <f> <v>- Filtra ejecuciones (ej. status failed)" -ForegroundColor White
             Write-Host "    /history -secure [<pw>] - Activa cifrado AES-256-GCM en la base de datos" -ForegroundColor White
+            Write-Host "    /history -rekey [<o> <n>]- Rota la contrasena maestra de la base de datos" -ForegroundColor White
+            Write-Host "    /history -decrypt [<pw>]- Quita el cifrado completo de la base de datos local" -ForegroundColor White
+            Write-Host "    /history -diagnose <id> - Diagnostica errores detallados de una ejecucion" -ForegroundColor White
+            Write-Host "    /credentials -list      - Lista las credenciales guardadas localmente" -ForegroundColor White
+            Write-Host "    /credentials -create <t> <n> <d> - Crea credencial en n8n y la vincula" -ForegroundColor White
             Write-Host "    /help                   - Mostrar esta ayuda" -ForegroundColor White
             Write-Host "    salir | exit | quit     - Terminar el cliente" -ForegroundColor White
             Write-Host ""
@@ -529,7 +735,8 @@ function Invoke-McpAgentLoop {
         }
         if ($inputText -match '^/connect\s+(\S+)\s+(.+)') {
             $global:McpServerUrl = $matches[1]
-            Set-McpToken -Token $matches[2]
+            $global:BearerToken = $matches[2]
+            Save-LocalConfig
             # Recargar workflows de la nueva instancia
             $wfMap = Get-WorkflowMap
             Write-Host "  [config] Conexion exitosa. $($wfMap.Count) workflows mapeados." -ForegroundColor Green
@@ -549,6 +756,7 @@ function Invoke-McpAgentLoop {
         }
         if ($inputText -match '^/url\s+(\S+)') {
             $global:McpServerUrl = $matches[1]
+            Save-LocalConfig
             Write-Host "  [config] URL de servidor MCP actualizada a $global:McpServerUrl" -ForegroundColor Cyan
             continue
         }
@@ -565,15 +773,283 @@ function Invoke-McpAgentLoop {
                 "No configurada"
             }
             
+            $pwStatus = if ($global:HistoryPassword) { "Activo (Cifrado local habilitado)" } else { "Inactivo (Base de datos sin contrasena)" }
+            $credCount = if ($global:CredentialsCache) { $global:CredentialsCache.Count } else { 0 }
+            
             Write-Host "
-  Configuración actual:" -ForegroundColor Cyan
-            Write-Host "    MCP Server URL:  $global:McpServerUrl" -ForegroundColor White
-            Write-Host "    MCP Token:       $mcpTokenMasked" -ForegroundColor White
-            Write-Host "    n8n API Key:     $apiKeyMasked" -ForegroundColor White
-            Write-Host "    n8n Domain:      $(if ($global:N8nDomain) { $global:N8nDomain } else { 'No configurado (derivado de MCP)' })" -ForegroundColor White
-            Write-Host "    Modelo Router:   $RouterModel" -ForegroundColor White
-            Write-Host "    DryRun Mode:     $DryRun" -ForegroundColor White
+  Configuracion actual:" -ForegroundColor Cyan
+            Write-Host "    MCP Server URL:    $global:McpServerUrl" -ForegroundColor White
+            Write-Host "    MCP Token:         $mcpTokenMasked" -ForegroundColor White
+            Write-Host "    n8n API Key:       $apiKeyMasked" -ForegroundColor White
+            Write-Host "    n8n Domain:        $(if ($global:N8nDomain) { $global:N8nDomain } else { 'No configurado' })" -ForegroundColor White
+            Write-Host "    Master Password:   $pwStatus" -ForegroundColor White
+            Write-Host "    Credenciales locales: $credCount registradas" -ForegroundColor White
+            Write-Host "    Modelo Router:     $RouterModel" -ForegroundColor White
+            Write-Host "    DryRun Mode:       $DryRun" -ForegroundColor White
             Write-Host ""
+            continue
+        }
+        if ($inputText -match '^/credentials(?:\s+(.*))?') {
+            $credArgs = $matches[1]
+            if ([string]::IsNullOrWhiteSpace($credArgs)) {
+                $credArgs = "-list"
+            }
+            
+            if ($credArgs -match '^-create\s+(\S+)\s+(.+)') {
+                $type = $matches[1]
+                $name = $null
+                $dataJsonStr = $null
+                $contextStr = "General"
+                $envMode = "prod"
+                $aliasStr = ""
+                $rest2 = $null
+                
+                $rawRest = $matches[2].Trim()
+                
+                if ($rawRest -match '-env\s+([a-zA-Z0-9_-]+)') {
+                    $envMode = $matches[1].ToLower()
+                    $rawRest = $rawRest -replace '-env\s+[a-zA-Z0-9_-]+', ''
+                }
+                if ($rawRest -match '-alias\s+([a-zA-Z0-9_-]+)') {
+                    $aliasStr = $matches[1]
+                    $rawRest = $rawRest -replace '-alias\s+[a-zA-Z0-9_-]+', ''
+                }
+                $rawRest = $rawRest.Trim()
+                
+                if ($rawRest -match '^"([^"]+)"\s+(.+)$') {
+                    $name = $matches[1]
+                    $rest2 = $matches[2]
+                } elseif ($rawRest -match "^'([^']+)'\s+(.+)$") {
+                    $name = $matches[1]
+                    $rest2 = $matches[2]
+                } else {
+                    $parts = $rawRest -split "\s+", 2
+                    $name = $parts[0]
+                    if ($parts.Count -gt 1) { $rest2 = $parts[1] }
+                }
+
+                if ($rest2) {
+                    $lastBraceIndex = $rest2.LastIndexOf("}")
+                    if ($lastBraceIndex -ge 0) {
+                        $dataJsonStr = $rest2.Substring(0, $lastBraceIndex + 1).Trim()
+                        $remainder = $rest2.Substring($lastBraceIndex + 1).Trim()
+                        if ($remainder) {
+                            if ($remainder -match '^"([^"]+)"$') { $contextStr = $matches[1] }
+                            elseif ($remainder -match "^'([^']+)'$") { $contextStr = $matches[1] }
+                            else { $contextStr = $remainder }
+                        }
+                    } else {
+                        $dataJsonStr = $rest2.Trim()
+                    }
+                }
+                
+                if ($dataJsonStr -and (($dataJsonStr.StartsWith("'") -and $dataJsonStr.EndsWith("'")) -or ($dataJsonStr.StartsWith('"') -and $dataJsonStr.EndsWith('"')))) {
+                    $dataJsonStr = $dataJsonStr.Substring(1, $dataJsonStr.Length - 2)
+                }
+
+                if (-not $name -or -not $dataJsonStr) {
+                    Write-Host "  [!] ERROR: Formato invalido. Uso: /credentials -create <type> <name> <dataJson> [<context>]" -ForegroundColor Red
+                    continue
+                }
+                
+                $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
+                if (-not $apiKeyValid) {
+                    Write-Host "  [!] ERROR: Se requiere una API Key configurada para crear credenciales." -ForegroundColor Red
+                    continue
+                }
+                
+                Write-Host "  [credentials] Creando credencial en n8n..." -ForegroundColor Cyan
+                $nodePath = "$PSScriptRoot\n8n-validator\execution-cache.js"
+                
+                # PowerShell external execution strips quotes in JSON. We must escape them explicitly.
+                $escapedDataJsonStr = $dataJsonStr -replace '"', '\"'
+                $res = & node $nodePath "create-credential" $global:N8nApiKey $global:N8nDomain $type $name $escapedDataJsonStr 2>&1
+                $jsonText = ($res -join "`n").Trim()
+                
+                try {
+                    $parsed = $jsonText | ConvertFrom-Json
+                    if ($parsed -and $parsed.success -and $parsed.data) {
+                        $credId = $parsed.data.id
+                        Write-Host ""
+                        Write-Host "  +======================================================+" -ForegroundColor Green
+                        Write-Host "  |           CREDENCIAL CREADA EXITOSAMENTE             |" -ForegroundColor Green
+                        Write-Host "  +======================================================+" -ForegroundColor Green
+                        Write-Host "  |  ID:       $credId" -ForegroundColor White
+                        Write-Host "  |  Nombre:   $name" -ForegroundColor White
+                        Write-Host "  |  Tipo:     $type" -ForegroundColor White
+                        Write-Host "  |  Entorno:  $envMode" -ForegroundColor White
+                        if ($aliasStr) { Write-Host "  |  Alias:    $aliasStr" -ForegroundColor White }
+                        Write-Host "  |  Contexto: $contextStr" -ForegroundColor DarkGray
+                        Write-Host "  +======================================================+" -ForegroundColor Green
+                        Write-Host ""
+                        
+                        if (-not $global:CredentialsCache) {
+                            $global:CredentialsCache = @()
+                        }
+                        
+                        $exists = $false
+                        foreach ($c in $global:CredentialsCache) {
+                            if ($c.type -eq $type -and $c.name -eq $name) {
+                                $c.id = $credId
+                                $c.context = $contextStr
+                                $c.env = $envMode
+                                $c.alias = $aliasStr
+                                if (-not $c.workflows) { $c.workflows = @() }
+                                $exists = $true
+                                break
+                            }
+                        }
+                        if (-not $exists) {
+                            $global:CredentialsCache += @{
+                                type = $type
+                                name = $name
+                                id = $credId
+                                context = $contextStr
+                                env = $envMode
+                                alias = $aliasStr
+                                workflows = @()
+                            }
+                        }
+                        
+                        Save-LocalConfig
+                        Write-Host "  [config] Mapeo de credencial guardado en config.json." -ForegroundColor Cyan
+                    } else {
+                        $errMsg = if ($parsed -and $parsed.error) { $parsed.error } else { "Error de comunicacion con n8n." }
+                        Write-Host "  [FAIL] Creacion de credencial fallida: $errMsg" -ForegroundColor Red
+                    }
+                } catch {
+                    Write-Host "  [FAIL] Error al parsear respuesta local: $jsonText" -ForegroundColor Red
+                }
+                continue
+            }
+            if ($credArgs -match '^-list') {
+                if (-not $global:CredentialsCache -or $global:CredentialsCache.Count -eq 0) {
+                    Write-Host "  No hay credenciales locales registradas en config.json." -ForegroundColor Yellow
+                    continue
+                }
+                
+                Write-Host ""
+                Write-Host "  +====================================================================================================================================================+" -ForegroundColor Cyan
+                Write-Host "  |                                                          CREDENCIALES REGISTRADAS LOCALMENTE                                                       |" -ForegroundColor Cyan
+                Write-Host "  +====================================================================================================================================================+" -ForegroundColor Cyan
+                Write-Host "  | Tipo                 | Nombre                    | Entorno | Alias           | ID (n8n UUID)        | Usos | Contexto                              |" -ForegroundColor Cyan
+                Write-Host "  +======================+===========================+=========+=================+======================+======+=======================================+" -ForegroundColor Cyan
+                
+                foreach ($c in $global:CredentialsCache) {
+                    $type = $c.type.ToString().PadRight(20).Substring(0, 20)
+                    $name = $c.name.ToString().PadRight(25).Substring(0, 25)
+                    $env = if ($c.env) { $c.env.ToString().PadRight(7).Substring(0, 7) } else { "prod   " }
+                    $aliasStr = if ($c.alias) { $c.alias.ToString().PadRight(15).Substring(0, 15) } else { "               " }
+                    $id = $c.id.ToString().PadRight(20).Substring(0, 20)
+                    $usos = if ($c.workflows) { $c.workflows.Count.ToString().PadRight(4) } else { "0   " }
+                    $contexto = if ($c.context) { $c.context.ToString().PadRight(37).Substring(0, 37) } else { "General                              " }
+                    
+                    Write-Host "  | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$type" -NoNewline -ForegroundColor White
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$name" -NoNewline -ForegroundColor White
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    $envColor = if ($env.Trim() -eq "prod") { "Green" } elseif ($env.Trim() -eq "sandbox") { "Yellow" } else { "Cyan" }
+                    Write-Host "$env" -NoNewline -ForegroundColor $envColor
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$aliasStr" -NoNewline -ForegroundColor Magenta
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$id" -NoNewline -ForegroundColor White
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$usos" -NoNewline -ForegroundColor Yellow
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$contexto" -NoNewline -ForegroundColor DarkGray
+                    Write-Host " |" -ForegroundColor Cyan
+                }
+                Write-Host "  +======================+===========================+=========+=================+======================+======+=======================================+" -ForegroundColor Cyan
+                Write-Host "  Total: $($global:CredentialsCache.Count) credenciales" -ForegroundColor DarkGray
+                continue
+            }
+            
+            Write-Host "  Uso de /credentials:" -ForegroundColor Cyan
+            Write-Host "    /credentials -list                         - Muestra la cache de credenciales local" -ForegroundColor White
+            Write-Host "    /credentials -create <type> <name> <data>  - Crea una credencial en n8n y la vincula localmente" -ForegroundColor White
+            Write-Host "    Ejemplo:" -ForegroundColor DarkGray
+            Write-Host "      /credentials -create slackApi `"Mi Slack`" '{`"accessToken`":`"xoxb-123`"}'" -ForegroundColor DarkGray
+            continue
+        }
+        
+        if ($inputText -match '^/variables(?:\s+(.*))?') {
+            $varArgs = $matches[1]
+            if ([string]::IsNullOrWhiteSpace($varArgs)) {
+                $varArgs = "-list"
+            }
+            
+            if ($varArgs -match '^-set\s+([a-zA-Z0-9_-]+)\s+(.+)') {
+                $key = $matches[1]
+                $val = $matches[2]
+                
+                if (($val.StartsWith("'") -and $val.EndsWith("'")) -or ($val.StartsWith('"') -and $val.EndsWith('"'))) {
+                    $val = $val.Substring(1, $val.Length - 2)
+                }
+                
+                $workflows = @()
+                if ($global:VariablesCache.ContainsKey($key) -and $global:VariablesCache[$key].workflows) {
+                    $workflows = $global:VariablesCache[$key].workflows
+                }
+                
+                $global:VariablesCache[$key] = @{
+                    value = $val
+                    workflows = $workflows
+                }
+                
+                Save-LocalConfig
+                Write-Host "  [KV] Variable '$key' guardada con exito." -ForegroundColor Green
+                
+                if ($workflows.Count -gt 0) {
+                    Write-Host "  [KV] Detectados $($workflows.Count) flujos dependientes. Disparando actualizacion en cascada..." -ForegroundColor Yellow
+                    try {
+                        $nodePath = "$PSScriptRoot\n8n-validator\update-workflow.js"
+                        $res = & node $nodePath $global:McpServerUrl $global:BearerToken $key 2>&1
+                        Write-Host "  [KV] Actualizacion:" -ForegroundColor DarkGray
+                        foreach ($line in $res) { Write-Host "       $line" -ForegroundColor DarkGray }
+                    } catch {
+                        Write-Host "  [FAIL] Error al actualizar workflows: $_" -ForegroundColor Red
+                    }
+                }
+                continue
+            }
+            
+            if ($varArgs -match '^-list') {
+                if ($global:VariablesCache.Count -eq 0) {
+                    Write-Host "  No hay variables locales registradas." -ForegroundColor Yellow
+                    continue
+                }
+                Write-Host ""
+                Write-Host "  +=========================================================================================+" -ForegroundColor Cyan
+                Write-Host "  |                                VARIABLES REGISTRADAS (KV)                               |" -ForegroundColor Cyan
+                Write-Host "  +=========================================================================================+" -ForegroundColor Cyan
+                Write-Host "  | Key                  | Valor                                   | Usos (Workflows)       |" -ForegroundColor Cyan
+                Write-Host "  +======================+=========================================+========================+" -ForegroundColor Cyan
+                
+                foreach ($k in $global:VariablesCache.Keys) {
+                    $vObj = $global:VariablesCache[$k]
+                    $keyStr = $k.PadRight(20).Substring(0, 20)
+                    $valStr = $vObj.value.ToString()
+                    if ($valStr.Length -gt 39) { $valStr = $valStr.Substring(0, 36) + "..." }
+                    $valStr = $valStr.PadRight(39)
+                    $usos = if ($vObj.workflows) { $vObj.workflows.Count.ToString().PadRight(22) } else { "0                     " }
+                    
+                    Write-Host "  | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$keyStr" -NoNewline -ForegroundColor White
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$valStr" -NoNewline -ForegroundColor Green
+                    Write-Host " | " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$usos" -NoNewline -ForegroundColor Yellow
+                    Write-Host " |" -ForegroundColor Cyan
+                }
+                Write-Host "  +======================+=========================================+========================+" -ForegroundColor Cyan
+                continue
+            }
+            
+            Write-Host "  Uso de /variables:" -ForegroundColor Cyan
+            Write-Host "    /variables -list                    - Muestra las variables locales y su uso" -ForegroundColor White
+            Write-Host "    /variables -set <key> <value>       - Crea o actualiza una variable y empuja los cambios a n8n" -ForegroundColor White
             continue
         }
         if ($inputText -match '^/history(?:\s+(.*))?') {
@@ -595,7 +1071,7 @@ function Invoke-McpAgentLoop {
                 
                 if (-not $syncKey) {
                     Write-Host "  [!] ERROR: Se requiere una API Key para sincronizar con n8n." -ForegroundColor Red
-                    Write-Host "  HINT: Pásala directamente: '/history -sync TU_API_KEY' o configúrala en `$env:N8N_API_KEY`." -ForegroundColor Yellow
+                    Write-Host "  HINT: Pasala directamente: '/history -sync TU_API_KEY' o configurala en `$env:N8N_API_KEY`." -ForegroundColor Yellow
                     continue
                 }
                 
@@ -611,10 +1087,10 @@ function Invoke-McpAgentLoop {
                 
                 $res = Invoke-HistoryDbCommand -Cmd "sync" -CmdArgs @($syncKey, $baseUrl)
                 if ($res -and $res.success) {
-                    Write-Host "  [OK] Sincronización incremental completada exitosamente." -ForegroundColor Green
+                    Write-Host "  [OK] Sincronizacion incremental completada exitosamente." -ForegroundColor Green
                 } else {
-                    $errMsg = if ($res -and $res.error) { $res.error } else { "Error de conexión o credenciales" }
-                    Write-Host "  [FAIL] Sincronización fallida: $errMsg" -ForegroundColor Red
+                    $errMsg = if ($res -and $res.error) { $res.error } else { "Error de conexion o credenciales" }
+                    Write-Host "  [FAIL] Sincronizacion fallida: $errMsg" -ForegroundColor Red
                 }
                 continue
             }
@@ -652,28 +1128,29 @@ function Invoke-McpAgentLoop {
             if ($historyArgs -match '^-secure(?:\s+(.+))?') {
                 $pw = $matches[1]
                 if (-not $pw) {
-                    Write-Host "Introduce la contraseña maestra para cifrar/descifrar la base de datos:" -ForegroundColor Cyan
+                    Write-Host "Introduce la contrasena maestra para cifrar/descifrar la base de datos:" -ForegroundColor Cyan
                     $securePw = Read-Host -AsSecureString
                     $pw = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePw))
                 }
                 
                 if ([string]::IsNullOrWhiteSpace($pw)) {
-                    Write-Host "  [!] Contraseña inválida o vacía." -ForegroundColor Red
+                    Write-Host "  [!] Contrasena invalida o vacia." -ForegroundColor Red
                     continue
                 }
                 
                 $oldPw = $global:HistoryPassword
                 $global:HistoryPassword = $pw
                 
-                Write-Host "  [history] Verificando contraseña y cargando base de datos..." -ForegroundColor Cyan
+                Write-Host "  [history] Verificando contrasena y cargando base de datos..." -ForegroundColor Cyan
                 $res = Invoke-HistoryDbCommand -Cmd "stats"
                 
                 if ($res -and $res.success) {
-                    Write-Host "  [OK] Contraseña correcta. Base de datos cargada y activa." -ForegroundColor Green
+                    Write-Host "  [OK] Contrasena correcta. Base de datos cargada y activa." -ForegroundColor Green
+                    Save-LocalConfig
                 } else {
                     $global:HistoryPassword = $oldPw
                     if ($res -and $res.error -match "Password incorrecto") {
-                        Write-Host "  [FAIL] La contraseña proporcionada es incorrecta." -ForegroundColor Red
+                        Write-Host "  [FAIL] La contrasena proporcionada es incorrecta." -ForegroundColor Red
                     } else {
                         Write-Host "  [FAIL] Error al intentar descifrar la base de datos: $($res.error)" -ForegroundColor Red
                     }
@@ -681,12 +1158,182 @@ function Invoke-McpAgentLoop {
                 continue
             }
             
+            if ($historyArgs -match '^-rekey(?:\s+(\S+)\s+(\S+))?') {
+                $oldPw = $matches[1]
+                $newPw = $matches[2]
+                if (-not $oldPw -or -not $newPw) {
+                    Write-Host "Introduce la contrasena maestra actual:" -ForegroundColor Cyan
+                    $oldSec = Read-Host -AsSecureString
+                    $oldPw = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($oldSec))
+                    
+                    Write-Host "Introduce la nueva contrasena maestra:" -ForegroundColor Cyan
+                    $newSec = Read-Host -AsSecureString
+                    $newPw = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($newSec))
+                }
+                
+                if ([string]::IsNullOrWhiteSpace($oldPw) -or [string]::IsNullOrWhiteSpace($newPw)) {
+                    Write-Host "  [!] Contrasenas invalidas." -ForegroundColor Red
+                    continue
+                }
+                
+                Write-Host "  [history] Rotando contrasena de la base de datos local..." -ForegroundColor Cyan
+                $res = & node "$PSScriptRoot\n8n-validator\execution-cache.js" "rekey" $oldPw $newPw 2>&1
+                $jsonText = ($res -join "`n").Trim()
+                try {
+                    $parsed = $jsonText | ConvertFrom-Json
+                    if ($parsed -and $parsed.success) {
+                        $global:HistoryPassword = $newPw
+                        Save-LocalConfig
+                        Write-Host "  [OK] $($parsed.message)" -ForegroundColor Green
+                    } else {
+                        $errMsg = if ($parsed -and $parsed.error) { $parsed.error } else { "Error al rotar contrasena." }
+                        Write-Host "  [FAIL] Rotacion fallida: $errMsg" -ForegroundColor Red
+                    }
+                } catch {
+                    Write-Host "  [FAIL] Error en la base de datos local: $jsonText" -ForegroundColor Red
+                }
+                continue
+            }
+            
+            if ($historyArgs -match '^-decrypt(?:\s+(.+))?') {
+                $pw = $matches[1]
+                if (-not $pw) {
+                    Write-Host "Introduce la contrasena de descifrado actual:" -ForegroundColor Cyan
+                    $sec = Read-Host -AsSecureString
+                    $pw = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto([System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+                }
+                
+                if ([string]::IsNullOrWhiteSpace($pw)) {
+                    Write-Host "  [!] Contrasena invalida." -ForegroundColor Red
+                    continue
+                }
+                
+                Write-Host "  [history] Descifrando base de datos y migrando a texto plano..." -ForegroundColor Cyan
+                $res = & node "$PSScriptRoot\n8n-validator\execution-cache.js" "decrypt" $pw 2>&1
+                $jsonText = ($res -join "`n").Trim()
+                try {
+                    $parsed = $jsonText | ConvertFrom-Json
+                    if ($parsed -and $parsed.success) {
+                        $global:HistoryPassword = $null
+                        Save-LocalConfig
+                        Write-Host "  [OK] $($parsed.message)" -ForegroundColor Green
+                    } else {
+                        $errMsg = if ($parsed -and $parsed.error) { $parsed.error } else { "Error al descifrar." }
+                        Write-Host "  [FAIL] Descifrado fallido: $errMsg" -ForegroundColor Red
+                    }
+                } catch {
+                    Write-Host "  [FAIL] Error en la base de datos local: $jsonText" -ForegroundColor Red
+                }
+                continue
+            }
+            
+            if ($historyArgs -match '^-diagnose\s+(\S+)') {
+                $execId = $matches[1]
+                
+                $apiKeyValid = $global:N8nApiKey -and $global:N8nApiKey -ne "YOUR_N8N_API_KEY_HERE"
+                if (-not $apiKeyValid) {
+                    Write-Host "  [!] ERROR: Se requiere una API Key configurada para diagnosticar ejecuciones." -ForegroundColor Red
+                    continue
+                }
+                
+                Write-Host "  [diagnose] Consultando ejecucion $execId en n8n API..." -ForegroundColor Cyan
+                try {
+                    $headers = @{
+                        "X-N8N-API-KEY" = $global:N8nApiKey
+                        "Accept" = "application/json"
+                    }
+                    $url = "$global:N8nDomain/api/v1/executions/$execId"
+                    $exec = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -TimeoutSec 15
+                    
+                    if (-not $exec) {
+                        Write-Host "  [!] No se recibio respuesta para la ejecucion $execId." -ForegroundColor Red
+                        continue
+                    }
+                    
+                    # Diagnostic Dashboard
+                    Write-Host ""
+                    Write-Host "  +========================================================================================+" -ForegroundColor Cyan
+                    Write-Host "  |                              DASHBOARD DE DIAGNOSTICO                                  |" -ForegroundColor Cyan
+                    Write-Host "  +========================================================================================+" -ForegroundColor Cyan
+                    Write-Host "  | ID Ejecucion:   $($exec.id)" -ForegroundColor White
+                    Write-Host "  | Workflow ID:    $($exec.workflowId)" -ForegroundColor White
+                    Write-Host "  | Estado:         " -NoNewline -ForegroundColor White
+                    
+                    if ($exec.status -eq "success") {
+                        Write-Host "SUCCESS" -ForegroundColor Green
+                    } elseif ($exec.status -eq "failed") {
+                        Write-Host "FAILED" -ForegroundColor Red
+                    } else {
+                        Write-Host "$($exec.status)" -ForegroundColor Yellow
+                    }
+                    
+                    Write-Host "  | Iniciado:       $($exec.startedAt)" -ForegroundColor White
+                    Write-Host "  | Finalizado:     $($exec.stoppedAt)" -ForegroundColor White
+                    Write-Host "  | Modo:           $($exec.mode)" -ForegroundColor White
+                    Write-Host "  +========================================================================================+" -ForegroundColor Cyan
+                    
+                    if ($exec.status -eq "failed" -and $exec.data -and $exec.data.resultData) {
+                        $resData = $exec.data.resultData
+                        
+                        $failedNodeName = "Desconocido"
+                        $errorMessage = "No se encontro un mensaje de error especifico en el payload."
+                        
+                        if ($resData.error) {
+                            $errorMessage = $resData.error.message
+                            if ($resData.error.description) {
+                                $errorMessage += " - $($resData.error.description)"
+                            }
+                            if ($resData.error.nodeName) {
+                                $failedNodeName = $resData.error.nodeName
+                            }
+                        }
+                        
+                        if ($resData.runData) {
+                            foreach ($nodeProp in $resData.runData.PSObject.Properties) {
+                                $nodeRun = $nodeProp.Value
+                                if ($nodeRun -and $nodeRun.Count -gt 0) {
+                                    $lastRun = $nodeRun[$nodeRun.Count - 1]
+                                    if ($lastRun.error) {
+                                        $failedNodeName = $nodeProp.Name
+                                        $errorMessage = $lastRun.error.message
+                                        if ($lastRun.error.description) {
+                                            $errorMessage += " - $($lastRun.error.description)"
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Write-Host "  | DETALLES DEL ERROR:" -ForegroundColor Red
+                        Write-Host "  |   Nodo Fallido: " -NoNewline -ForegroundColor White
+                        Write-Host "$failedNodeName" -ForegroundColor Red
+                        Write-Host "  |   Mensaje:      " -NoNewline -ForegroundColor White
+                        
+                        $wrappedError = $errorMessage -split "`n"
+                        foreach ($line in $wrappedError) {
+                            Write-Host "                    $line" -ForegroundColor Yellow
+                        }
+                    } else {
+                        Write-Host "  | La ejecucion se completo con exito o no contiene informacion de fallas." -ForegroundColor Green
+                    }
+                    Write-Host "  +========================================================================================+" -ForegroundColor Cyan
+                    Write-Host ""
+                } catch {
+                    Write-Host "  [!] ERROR al conectar con la API de n8n o al buscar la ejecucion: $_" -ForegroundColor Red
+                }
+                continue
+            }
+            
             Write-Host "  Uso de /history:" -ForegroundColor Cyan
             Write-Host "    /history -sync [<key>]  - Sincroniza ejecuciones y workflows de n8n" -ForegroundColor White
             Write-Host "    /history -list [<limit>]- Lista las ejecuciones almacenadas localmente" -ForegroundColor White
-            Write-Host "    /history -stats         - Muestra métricas agregadas por workflow" -ForegroundColor White
+            Write-Host "    /history -stats         - Muestra metricas agregadas por workflow" -ForegroundColor White
             Write-Host "    /history -filter <f> <v>- Filtra ejecuciones (ej. status failed)" -ForegroundColor White
             Write-Host "    /history -secure [<pw>] - Activa cifrado AES-256-GCM en la base de datos" -ForegroundColor White
+            Write-Host "    /history -rekey [<o> <n>]- Rota la contrasena maestra de la base de datos" -ForegroundColor White
+            Write-Host "    /history -decrypt [<pw>]- Quita el cifrado completo de la base de datos local" -ForegroundColor White
+            Write-Host "    /history -diagnose <id> - Diagnostica errores detallados de una ejecucion" -ForegroundColor White
             continue
         }
 
@@ -809,7 +1456,26 @@ function Invoke-McpAgentLoop {
             Write-Host "  [resolve] workflowId = $($filledArgs['workflowId'])" -ForegroundColor DarkYellow
         }
 
-                # STEP 4.5: VALIDACION LOCAL DEL SDK (antes de tocar MCP remoto)
+        if ($toolName -match 'data_table' -and [string]::IsNullOrWhiteSpace($filledArgs['projectId']) -and $toolName -ne 'search_data_tables') {
+            Write-Host "  [datatable] projectId no provisto por LLM, buscando el proyecto por defecto..." -ForegroundColor Cyan
+            $prjResult = Send-McpRequest -Method "tools/call" -Params @{ name = "search_projects"; arguments = @{ limit = 1 } }
+            if ($prjResult -and $prjResult.content) {
+                $text = ($prjResult.content | Where-Object { $_.type -eq "text" } | Select-Object -ExpandProperty text) -join ""
+                try {
+                    $parsedPrj = $text | ConvertFrom-Json
+                    if ($parsedPrj.data -and $parsedPrj.data.Count -gt 0) {
+                        $filledArgs['projectId'] = $parsedPrj.data[0].id
+                        Write-Host "  [datatable] Autocompletado projectId = $($filledArgs['projectId']) ($($parsedPrj.data[0].name))" -ForegroundColor Green
+                    } else {
+                        Write-Host "  [datatable] ADVERTENCIA: No se pudo obtener projectId por defecto." -ForegroundColor Yellow
+                    }
+                } catch {
+                    Write-Host "  [datatable] Error al parsear projects: $_" -ForegroundColor Red
+                }
+            }
+        }
+
+        # STEP 4.5: VALIDACION LOCAL DEL SDK (antes de tocar MCP remoto)
         if (($toolName -eq 'create_workflow_from_code' -or $toolName -eq 'validate_workflow') -and $filledArgs['code'] -and $filledArgs['code'] -notmatch '^\s*//\s*TODO') {
             Write-Host "  [sdk-validate] Validando codigo localmente..." -ForegroundColor DarkGray
             $valResult = Invoke-LocalSDKValidation -code $filledArgs['code']

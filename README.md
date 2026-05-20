@@ -170,6 +170,8 @@ If no template matches (score < 15%):
 ├── create-n8n-workflow.ps1      # CLI entry point
 ├── mcp-client-v3.ps1            # Interactive client (simplified)
 ├── mcp-client-n8n-final.ps1     # Interactive client (full pipeline v2)
+├── run-tests.cmd                # Master test execution script
+├── test-suite.ps1               # PowerShell test suite for regex & interceptor routing
 ├── arg-extractor-v2.psm1      # PowerShell module: argument extraction + template filling
 ├── local-validator.psm1       # PowerShell module: local SDK validation wrapper
 ├── tool-schemas.json          # Strict schema definitions for MCP tools
@@ -181,7 +183,52 @@ If no template matches (score < 15%):
     ├── workflow-builder-v2.js # Pipeline v3 engine (Node.js)
     ├── validate-sdk.js        # SDK validator with EMPTY_WORKFLOW guard
     ├── sdk-generator.js       # LLM fallback generator with retry
-    └── template-filler.js     # Slot detection and filling
+    ├── template-filler.js     # Slot detection and filling
+    ├── test-suite.js          # Node.js unit tests for validation & KV substitution
+    └── update-workflow.js     # Node.js workflow update & cascading KV propagator
+```
+
+## Advanced Features
+
+### 🔑 External KV Variables Cache (Cascading Updates)
+- **Local Storage**: Retains a secure variables cache at `n8n-executions-db/config.json` avoiding community-edition limitations.
+- **Dynamic Substitution**: Variables matching `__KV_key__` are automatically resolved and replaced with real values.
+- **Cascading Updates**: Updating a variable's value automatically scans and updates all dependent workflows in n8n remotely, linking credentials and updating code via the `update_workflow` MCP tool.
+
+### 📊 Data Tables Interceptor (Multilingual Support)
+- **Auto-resolved `projectId`**: Transparently intercepts data table CRUD requests, fetches the primary Home Project ID via `search_projects`, and injects it into tool parameters.
+- **Multilingual Support**: Supports Spanish queries (e.g. *"crea una tabla de datos"*, *"agrega una columna a la tabla"*) in the clustering regex, routing them cleanly to data tables tools.
+
+## Automated Test Battery
+
+We include a master script to run Node.js unit tests and PowerShell regex routing tests:
+
+```bash
+# Execute all tests
+.\run-tests.cmd
+```
+
+Output:
+```
+===================================
+INICIANDO BATERIA DE TESTS
+===================================
+
+=== BATERIA DE TESTS NODE.js ===
+✅ stripImports: OK
+✅ validateLocal: OK
+✅ fillSlotsWithKV: OK
+================================
+
+=== BATERIA DE TESTS POWERSHELL ===
+  [config] Configuracion cargada desde cache local config.json.
+✅ Get-ClusterByRegex: OK
+✅ Interceptor Data Tables Regex: OK
+===================================
+
+===================================
+TESTS FINALIZADOS
+===================================
 ```
 
 ## Security Notes

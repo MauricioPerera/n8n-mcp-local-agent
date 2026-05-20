@@ -114,12 +114,18 @@ async function matchTemplate(query, templates) {
     return null;
 }
 
-async function extractSlots(query, slots) {
+async function extractSlots(query, slots, variables = []) {
+    let varsHint = "";
+    if (variables && variables.length > 0) {
+        varsHint = `\n\nAVAILABLE VARIABLES:\nThe user has defined the following reusable KV variables: [${variables.join(", ")}].\nIf the user's query implies they want to use one of these variables, you MUST extract the value as "__KV_variablename__" instead of guessing the literal text. For example, if the query says "usa la variable email para el destino", output {"to": "__KV_email__"}.`;
+    }
+
     const systemPrompt = `You are a strict data extraction assistant.
 Given a user query and a list of target slot names, extract the appropriate values from the query.
 Return ONLY a raw JSON object mapping slot names to extracted string values.
 Do NOT wrap the JSON in markdown code blocks. Do NOT add any conversational text or explanations.
 If a slot is not present or cannot be extracted, omit it from the JSON object.
+${varsHint}
 
 Example 1:
 Query: "envía un correo a soporte@empresa.com con el asunto Servidor Caído"

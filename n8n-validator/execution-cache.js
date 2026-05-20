@@ -292,11 +292,123 @@ function getAggregatedStats() {
     return stats;
 }
 
+// Rotate the encryption key (rekey)
+async function rotateKey(oldPassword, newPassword) {
+    if (!oldPassword || !newPassword) {
+        throw new Error("Se requiere contraseña anterior y nueva para rotar.");
+    }
+    
+    let baseAdapter = new FileStorageAdapter(DB_DIR);
+    let oldAdapter = await EncryptedAdapter.create(baseAdapter, oldPassword);
+    
+    // Preload to decrypt
+    await oldAdapter.preload([
+        "executions.docs.json", "executions.meta.json",
+        "workflows.docs.json", "workflows.meta.json"
+    ]);
+    
+    // Validate old password
+    const testData = oldAdapter.readJson("executions.docs.json");
+    if (testData === null) {
+        throw new Error("Password incorrecto: Error al descifrar la base de datos.");
+    }
+    
+    const oldDb = new DocStore(oldAdapter);
+    const executions = oldDb.collection("executions").find().toArray();
+    const workflows = oldDb.collection("workflows").find().toArray();
+    
+    // Create new adapter with the new password
+    let newAdapter = await EncryptedAdapter.create(baseAdapter, newPassword);
+    let newDb = new DocStore(newAdapter);
+    
+    // Write collections to new encrypted adapter
+    newDb.collection("executions").insertMany(executions);
+    newDb.collection("workflows").insertMany(workflows);
+    
+    newDb.flush();
+    await newAdapter.persist();
+}
+
+// Remove encryption completely, migrating back to plaintext
+async function removeEncryption(password) {
+    if (!password) {
+        throw new Error("Se requiere contraseña para descifrar la base de datos.");
+    }
+    
+    let baseAdapter = new FileStorageAdapter(DB_DIR);
+    let encryptedAdapter = await EncryptedAdapter.create(baseAdapter, password);
+    
+    await encryptedAdapter.preload([
+        "executions.docs.json", "executions.meta.json",
+        "workflows.docs.json", "workflows.meta.json"
+    ]);
+    
+    const testData = encryptedAdapter.readJson("executions.docs.json");
+    if (testData === null) {
+        throw new Error("Password incorrecto: Error al descifrar la base de datos.");
+    }
+    
+    const encDb = new DocStore(encryptedAdapter);
+    const executions = encDb.collection("executions").find().toArray();
+    const workflows = encDb.collection("workflows").find().toArray();
+    
+    // Remove encrypted files from disk to prevent adapter confusion
+    const filesToDelete = [
+        "executions.docs.json", "executions.meta.json",
+        "workflows.docs.json", "workflows.meta.json"
+    ];
+    for (const f of filesToDelete) {
+        const p = path.join(DB_DIR, f);
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+    }
+    
+    // Create unencrypted database
+    let plainDb = new DocStore(baseAdapter);
+    plainDb.collection("executions").insertMany(executions);
+    plainDb.collection("workflows").insertMany(workflows);
+    
+    plainDb.flush();
+}
+
+// Create credentials via n8n public REST API
+async function createCredential(apiKey, baseUrl, type, name, dataJsonStr) {
+    const url = `${baseUrl}/api/v1/credentials`;
+    
+    let parsedData = {};
+    try {
+        parsedData = JSON.parse(dataJsonStr);
+    } catch (err) {
+        throw new Error(`dataJson inválido: ${err.message}`);
+    }
+    
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+            "X-N8N-API-KEY": apiKey,
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        },
+        body: JSON.stringify({
+            name: name,
+            type: type,
+            data: parsedData
+        })
+    });
+    
+    if (!resp.ok) {
+        const errorText = await resp.text();
+        throw new Error(`n8n API returned status ${resp.status}: ${errorText}`);
+    }
+    
+    const body = await resp.json();
+    return body;
+}
+
 // CLI Command router
 async function main() {
     const args = process.argv.slice(2);
     if (args.length === 0) {
-        console.log(JSON.stringify({ error: "Comando requerido (sync|list|filter|stats)" }));
+        console.log(JSON.stringify({ error: "Comando requerido" }));
         return;
     }
     
@@ -316,7 +428,42 @@ async function main() {
     }
     
     try {
+        // Intercept administrative non-database commands
+        if (cmd === "rekey") {
+            const oldPw = cmdArgs[0];
+            const newPw = cmdArgs[1];
+            await rotateKey(oldPw, newPw);
+            console.log(JSON.stringify({ success: true, message: "Rotación de contraseña maestra completada exitosamente" }));
+            return;
+        }
+        
+        if (cmd === "decrypt") {
+            const pw = cmdArgs[0];
+            await removeEncryption(pw);
+            console.log(JSON.stringify({ success: true, message: "Base de datos descifrada y migrada a texto plano exitosamente" }));
+            return;
+        }
+        
+        if (cmd === "create-credential") {
+            const apiKey = cmdArgs[0];
+            const baseUrl = cmdArgs[1];
+            const type = cmdArgs[2];
+            const name = cmdArgs[3];
+            const dataJsonStr = cmdArgs[4];
+            
+            if (!apiKey || !baseUrl || !type || !name || !dataJsonStr) {
+                console.log(JSON.stringify({ error: "Faltan argumentos para crear la credencial" }));
+                return;
+            }
+            
+            const credential = await createCredential(apiKey, baseUrl, type, name, dataJsonStr);
+            console.log(JSON.stringify({ success: true, data: credential }));
+            return;
+        }
+        
+        // Standard database commands
         await initDb(password);
+        
         if (cmd === "sync") {
             const apiKey = cmdArgs[0];
             const baseUrl = cmdArgs[1] || "https://ardf.dev";
